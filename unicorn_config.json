@@ -1,0 +1,11 @@
+{
+  "services": [
+    {"name": "products_0", "script": "app/products/app.py", "port": 5010, "enabled": true},
+    {"name": "products_1", "script": "app/products/app.py", "port": 5011, "enabled": true},
+    {"name": "orders_0", "script": "app/orders/app.py", "port": 5020, "enabled": true},
+    {"name": "orders_1", "script": "app/orders/app.py", "port": 5021, "enabled": true},
+    {"name": "users_0", "script": "app/users/app.py", "port": 5030, "enabled": true},
+    {"name": "users_1", "script": "app/users/app.py", "port": 5031, "enabled": true}
+  ],
+  "restart_delay": 5
+}

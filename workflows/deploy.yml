@@ -1,0 +1,87 @@
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+env:
+  AWS_REGION: ap-south-1
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Configure AWS
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AK }}
+          aws-secret-access-key: ${{ secrets.SAK }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Deploy to all instances
+        run: |
+          wait_for_ssm() {
+            local CMD_ID=$1
+            local INSTANCE_ID=$2
+            local MAX_WAIT=600
+            local ELAPSED=0
+            
+            while [ $ELAPSED -lt $MAX_WAIT ]; do
+              STATUS=$(aws ssm get-command-invocation --instance-id "$INSTANCE_ID" --command-id "$CMD_ID" --query "Status" --output text --region $AWS_REGION 2>/dev/null || echo "Pending")
+              echo "  $STATUS (${ELAPSED}s)"
+              [[ "$STATUS" == "Success" || "$STATUS" == "Failed" || "$STATUS" == "TimedOut" ]] && break
+              sleep 10
+              ELAPSED=$((ELAPSED + 10))
+            done
+            
+            if [ "$STATUS" = "Failed" ]; then
+              echo "--- Errors ---"
+              aws ssm get-command-invocation --instance-id "$INSTANCE_ID" --command-id "$CMD_ID" --query "StandardErrorContent" --output text --region $AWS_REGION
+            fi
+            
+            [ "$STATUS" = "Success" ]
+          }
+            
+          INSTANCES=$(cat instances.json | jq -c '.instances[]')
+
+          for instance in $INSTANCES; do
+            NAME=$(echo $instance | jq -r '.name')
+            ID=$(echo $instance | jq -r '.instance_id')
+            IP=$(echo $instance | jq -r '.server_ip')
+            REPO_URL="https://github.com/${{ github.repository }}.git"
+
+            echo "=========================================="
+            echo "Deploying to $NAME ($IP)"
+            echo "=========================================="
+
+            # Run setup script directly from repo
+            DEPLOY_CMD=$(aws ssm send-command \
+              --instance-ids "$ID" \
+              --document-name "AWS-RunPowerShellScript" \
+              --parameters "commands=[\"cd C:\\\\; if(!(Test-Path temp)){New-Item -ItemType Directory -Path temp}; cd temp; git clone $REPO_URL project 2>&1; cd project; .\\\\setup-production.ps1; cd C:\\\\; Remove-Item -Recurse -Force temp\"]" \
+              --timeout-seconds 600 \
+              --output text \
+              --query "Command.CommandId" \
+              --region $AWS_REGION)
+
+            echo "Deploy command: $DEPLOY_CMD"
+            
+            if ! wait_for_ssm "$DEPLOY_CMD" "$ID"; then
+              echo "[FAIL] Deployment failed for $NAME"
+              exit 1
+            fi
+
+            echo ""
+            echo "[SUCCESS] Deployed to $NAME"
+            echo "  API: http://$IP"
+            echo ""
+          done
+
+          echo "=========================================="
+          echo "[SUCCESS] All deployments completed!"
+          echo "=========================================="

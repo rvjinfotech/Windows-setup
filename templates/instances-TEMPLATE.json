@@ -1,0 +1,9 @@
+{
+  "instances": [
+    {
+      "name": "production",
+      "instance_id": "i-0xxxxxxxxxxxxx",
+      "server_ip": "13.xxx.xxx.xxx"
+    }
+  ]
+}
