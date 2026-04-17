@@ -14,16 +14,19 @@
 
 ---
 
-## ✨ What You Get
+## ✅ Steps
 
-| Feature | Details |
-|---|---|
-| 🚀 **Auto-deploy** | Triggers on every `git push` |
-| ⚖️ **Load balancing** | Round-robin across multiple workers |
-| 🔄 **Auto-restart** | Crashed workers restart in seconds |
-| 🟢 **Zero downtime** | Rolling deployments |
-| 🔐 **No SSH needed** | Uses AWS SSM |
-| 🪟 **Windows EC2** | Full Windows Server support |
+- [ ] Copy 6 files into your project
+- [ ] `unicorn_config.json` — set your workers and ports
+- [ ] `nginx.conf` — match upstream ports to workers
+- [ ] `instances.json` — add your EC2 instance ID and IP
+- [ ] `app.py` — add `PORT = int(os.getenv("PORT", 5000))` and use it
+- [ ] `requirements.txt` — list all dependencies
+- [ ] GitHub Secrets — add `AK` and `SAK`
+- [ ] `git push` and wait ~5 minutes
+- [ ] Visit `http://YOUR_SERVER_IP` 🎉
+
+
 
 ---
 
@@ -193,6 +196,18 @@ git push
                │     └── Install requirements.txt
                └── Unicorn starts workers → Nginx load balances → App is live ✅
 ```
+---
+
+## ✨ What You Get
+
+| Feature | Details |
+|---|---|
+| 🚀 **Auto-deploy** | Triggers on every `git push` |
+| ⚖️ **Load balancing** | Round-robin across multiple workers |
+| 🔄 **Auto-restart** | Crashed workers restart in seconds |
+| 🟢 **Zero downtime** | Rolling deployments |
+| 🔐 **No SSH needed** | Uses AWS SSM |
+| 🪟 **Windows EC2** | Full Windows Server support |
 
 ---
 
@@ -360,22 +375,4 @@ Add an `init_database.py` file. The setup script runs it automatically on first 
 
 ---
 
-## ✅ New Project Checklist
 
-- [ ] Copy 6 files into your project
-- [ ] `unicorn_config.json` — set your workers and ports
-- [ ] `nginx.conf` — match upstream ports to workers
-- [ ] `instances.json` — add your EC2 instance ID and IP
-- [ ] `app.py` — add `PORT = int(os.getenv("PORT", 5000))` and use it
-- [ ] `requirements.txt` — list all dependencies
-- [ ] GitHub Secrets — add `AK` and `SAK`
-- [ ] `git push` and wait ~5 minutes
-- [ ] Visit `http://YOUR_SERVER_IP` 🎉
-
----
-
-<div align="center">
-
-**Questions or issues? [Open an issue](../../issues) in this repo.**
-
-</div>
