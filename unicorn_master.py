@@ -31,11 +31,18 @@ def main():
     processes = []
     restart_delay = config.get("restart_delay", 5)
     
-    print("[UNICORN] Starting workers...")
+    # Get mode from environment (web or worker)
+    mode = os.getenv("MODE", "web").lower()
+    print(f"[UNICORN] Starting in {mode} mode...")
     
     # Start all workers
     for service in config["services"]:
         if not service.get("enabled", True):
+            continue
+        
+        # Filter by mode
+        service_mode = service.get("mode", "web").lower()
+        if service_mode != mode:
             continue
         
         name = service["name"]

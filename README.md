@@ -30,7 +30,7 @@
 
 ---
 
-## 📁 The 6 Files
+## 📁 The 7 Files
 
 ```
 your-project/
@@ -38,6 +38,7 @@ your-project/
 │   └── deploy.yml                 ← 🔒 Universal — never change
 ├── setup-production.ps1           ← 🔒 Universal — never change
 ├── unicorn_master.py              ← 🔒 Universal — never change
+└── setup-production-REPO.ps1      ← 🔒 Universal — never change
 ├── unicorn_config.json            ← ⚙️  Configure: define your workers
 ├── nginx.conf                     ← ⚙️  Configure: match worker ports
 └── instances.json                 ← ⚙️  Configure: add your EC2 servers

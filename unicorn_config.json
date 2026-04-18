@@ -5,7 +5,8 @@
     {"name": "orders_0", "script": "app/orders/app.py", "port": 5020, "enabled": true},
     {"name": "orders_1", "script": "app/orders/app.py", "port": 5021, "enabled": true},
     {"name": "users_0", "script": "app/users/app.py", "port": 5030, "enabled": true},
-    {"name": "users_1", "script": "app/users/app.py", "port": 5031, "enabled": true}
+    {"name": "users_1", "script": "app/users/app.py", "port": 5031, "enabled": true},
+    {"name": "worker_0", "script": "celery_worker.py", "port": 5100, "mode": "worker", "enabled": true}
   ],
   "restart_delay": 5
 }

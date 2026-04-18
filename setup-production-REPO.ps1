@@ -137,18 +137,33 @@ if (!$firewallRule) {
 # ============================================================================
 Write-Host "[8/9] Setting up services..." -ForegroundColor Yellow
 
-# Setup UnicornMaster service
+# Setup UnicornMaster service (web mode)
 if (Test-Path "$INSTALL_PATH\unicorn_master.py") {
     $unicornService = Get-Service UnicornMaster -ErrorAction SilentlyContinue
     if (!$unicornService) {
         & C:\nssm\nssm.exe install UnicornMaster "$INSTALL_PATH\venv\Scripts\python.exe" "$INSTALL_PATH\unicorn_master.py"
         & C:\nssm\nssm.exe set UnicornMaster AppDirectory $INSTALL_PATH
+        & C:\nssm\nssm.exe set UnicornMaster AppEnvironmentExtra MODE=web
         & C:\nssm\nssm.exe set UnicornMaster Start SERVICE_AUTO_START
         & C:\nssm\nssm.exe start UnicornMaster
-        Write-Host "  [OK] UnicornMaster service installed" -ForegroundColor Green
+        Write-Host "  [OK] UnicornMaster (web) installed" -ForegroundColor Green
     } else {
         & C:\nssm\nssm.exe restart UnicornMaster
-        Write-Host "  [OK] UnicornMaster service restarted" -ForegroundColor Green
+        Write-Host "  [OK] UnicornMaster (web) restarted" -ForegroundColor Green
+    }
+    
+    # Setup Worker service
+    $workerService = Get-Service UnicornWorker -ErrorAction SilentlyContinue
+    if (!$workerService) {
+        & C:\nssm\nssm.exe install UnicornWorker "$INSTALL_PATH\venv\Scripts\python.exe" "$INSTALL_PATH\unicorn_master.py"
+        & C:\nssm\nssm.exe set UnicornWorker AppDirectory $INSTALL_PATH
+        & C:\nssm\nssm.exe set UnicornWorker AppEnvironmentExtra MODE=worker
+        & C:\nssm\nssm.exe set UnicornWorker Start SERVICE_AUTO_START
+        & C:\nssm\nssm.exe start UnicornWorker
+        Write-Host "  [OK] UnicornWorker installed" -ForegroundColor Green
+    } else {
+        & C:\nssm\nssm.exe restart UnicornWorker
+        Write-Host "  [OK] UnicornWorker restarted" -ForegroundColor Green
     }
 }
 
