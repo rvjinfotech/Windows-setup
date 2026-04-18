@@ -1,378 +1,219 @@
-<div align="center">
+# Universal Windows Deployment Kit for Python (Unicorn + Nginx + Celery)
+Deploy Python web apps on Windows EC2 using GitHub Actions + AWS SSM, with:
+- Nginx reverse proxy and load balancing
+- Unicorn process supervision (web + worker modes)
+- Optional Celery workers for background jobs
 
-# 🦄 Universal Python Deployment System
+This repository is meant to be a reusable template/tutorial.
 
-### Deploy any Python web app to Windows EC2 — in 5 minutes.
+## What this system is (and is not)
+- **Unicorn in this repo** is a custom Python process supervisor (`unicorn_master.py`), not the Ruby Unicorn server.
+- It provides **process management**, not thread-pool management like Puma.
+- Request concurrency comes from:
+  - Nginx distributing traffic across multiple web worker processes
+  - your Python app server behavior inside each process
+- Background job concurrency comes from Celery worker settings (`CELERY_POOL`, `CELERY_CONCURRENCY`, queues, etc).
 
-*Copy 6 files → Configure 3 settings → Push to GitHub → Live.*
+## How it works end-to-end
+1. You push code to `main` (or run workflow manually).
+2. `.github/workflows/deploy.yml` runs and sends an AWS SSM command to each server in `instances.json`.
+3. SSM command clones repo on the server and runs `setup-production-REPO.ps1`.
+4. Setup script installs dependencies, copies files to `C:\production`, and configures Windows services:
+   - `UnicornMaster` (`MODE=web`)
+   - `UnicornWorker` (`MODE=worker`)
+   - `NginxService`
+5. `unicorn_master.py` reads `unicorn_config.json`, launches and monitors enabled services for its mode.
+6. Nginx receives public traffic on port 80 and forwards to your internal app worker ports.
 
-[![Works With](https://img.shields.io/badge/Works%20With-Flask%20%7C%20Django%20%7C%20FastAPI-blue?style=for-the-badge)](.)
-[![Platform](https://img.shields.io/badge/Platform-Windows%20EC2-orange?style=for-the-badge&logo=amazon-aws)](.)
-[![Setup Time](https://img.shields.io/badge/Setup%20Time-~5%20minutes-brightgreen?style=for-the-badge)](.)
+## Files: universal vs project-specific
+### Universal files (usually keep as-is)
+- `.github/workflows/deploy.yml`
+- `setup-production-REPO.ps1`
+- `unicorn_master.py`
 
-</div>
+### Project-specific files (you must customize)
+- `unicorn_config.json`
+- `nginx.conf`
+- `instances.json`
+- `requirements.txt`
+- your app entry scripts referenced by `unicorn_config.json`
+- optional `celery_worker.py` and your Celery app module
 
----
+### Optional templates
+- `templates/nginx-TEMPLATE.conf`
+- `templates/instances-TEMPLATE.json`
 
-## ✅ Steps
+## Minimal integration checklist for any Python project
+1. Copy universal files into your project.
+2. Add/update `unicorn_config.json` with correct script paths and unique ports.
+3. Add/update `nginx.conf` to match your routing model and worker ports.
+4. Ensure your web app entrypoint reads `PORT` from environment.
+5. Add all dependencies to `requirements.txt`.
+6. Fill `instances.json` with your EC2 instance IDs and public IPs.
+7. Add GitHub Secrets:
+   - `AK` (AWS access key)
+   - `SAK` (AWS secret access key)
+8. Push to `main` and monitor Actions logs.
 
-- [ ] Copy 6 files into your project
-- [ ] `unicorn_config.json` — set your workers and ports
-- [ ] `nginx.conf` — match upstream ports to workers
-- [ ] `instances.json` — add your EC2 instance ID and IP
-- [ ] `app.py` — add `PORT = int(os.getenv("PORT", 5000))` and use it
-- [ ] `requirements.txt` — list all dependencies
-- [ ] GitHub Secrets — add `AK` and `SAK`
-- [ ] `git push` and wait ~5 minutes
-- [ ] Visit `http://YOUR_SERVER_IP` 🎉
+## File-by-file: what to change and when
+### 1) `unicorn_config.json` (always change)
+Defines what Unicorn starts.
 
-
-
----
-
-## 📁 The 6 Files
-
-```
-your-project/
-├── .github/workflows/
-│   └── deploy.yml                 ← 🔒 Universal — never change
-├── setup-production-REPO.ps1      ← 🔒 Universal — never change
-├── unicorn_master.py              ← 🔒 Universal — never change
-├── unicorn_config.json            ← ⚙️  Configure: define your workers
-├── nginx.conf                     ← ⚙️  Configure: match worker ports
-└── instances.json                 ← ⚙️  Configure: add your EC2 servers
-```
-
-> 🔒 **Universal files** work with any project — copy and forget.
-> ⚙️ **Config files** are the only 3 things you customize.
-
----
-
-## 🎯 Quick Start
-
-### Step 1 — Configure Your Workers (`unicorn_config.json`)
-
-**Simple app (single Python file):**
+Example (single app scale-out + one Celery worker):
 ```json
 {
   "services": [
-    {"name": "worker_0", "script": "app.py", "port": 5000, "enabled": true},
-    {"name": "worker_1", "script": "app.py", "port": 5001, "enabled": true},
-    {"name": "worker_2", "script": "app.py", "port": 5002, "enabled": true},
-    {"name": "worker_3", "script": "app.py", "port": 5003, "enabled": true}
+    {"name": "api_0", "script": "app.py", "port": 5000, "enabled": true},
+    {"name": "api_1", "script": "app.py", "port": 5001, "enabled": true},
+    {"name": "api_2", "script": "app.py", "port": 5002, "enabled": true},
+    {"name": "worker_0", "script": "celery_worker.py", "port": 5100, "mode": "worker", "enabled": true}
   ],
   "restart_delay": 5
 }
 ```
 
-**Microservices (multiple apps):**
-```json
-{
-  "services": [
-    {"name": "products_0", "script": "app/products/app.py", "port": 5010, "enabled": true},
-    {"name": "products_1", "script": "app/products/app.py", "port": 5011, "enabled": true},
-    {"name": "orders_0",   "script": "app/orders/app.py",   "port": 5020, "enabled": true},
-    {"name": "orders_1",   "script": "app/orders/app.py",   "port": 5021, "enabled": true}
-  ],
-  "restart_delay": 5
-}
-```
+Rules:
+- Web services: omit `mode` or set `mode: "web"`.
+- Background workers: set `mode: "worker"`.
+- Every `port` must be unique.
+- Every `script` path must exist in repo.
 
-| Field | Description |
-|---|---|
-| `name` | Worker identifier (used in logs) |
-| `script` | Path to your Python file |
-| `port` | Must be unique per worker |
-| `enabled` | `true` / `false` to toggle |
+### 2) `nginx.conf` (always review/change)
+Must align with your app topology.
 
----
+Common patterns:
+- **Single app scaling**: one upstream with many ports, `location /` to that upstream.
+- **Microservices**: separate upstreams and path-based routing (`/products`, `/orders`, `/users`).
 
-### Step 2 — Configure Load Balancer (`nginx.conf`)
+Important:
+- If Nginx points to wrong ports/scripts, you get `502 Bad Gateway`.
+- If you keep default Nginx config, you’ll see default welcome page instead of your app.
 
-Match the `upstream` ports to your workers:
-
-```nginx
-upstream app_servers {
-    server 127.0.0.1:5000;  # ← Match these ports
-    server 127.0.0.1:5001;  #   to unicorn_config.json
-    server 127.0.0.1:5002;
-    server 127.0.0.1:5003;
-}
-```
-
----
-
-### Step 3 — Add Your Servers (`instances.json`)
-
+### 3) `instances.json` (always change)
+Set deploy targets:
 ```json
 {
   "instances": [
-    {"name": "production", "instance_id": "i-0abc123def456", "server_ip": "13.xxx.xxx.xxx"},
-    {"name": "staging",    "instance_id": "i-0def456ghi789", "server_ip": "13.xxx.xxx.xxx"}
+    {"name": "production", "instance_id": "i-xxxxxxxx", "server_ip": "13.xxx.xxx.xxx"}
   ]
 }
 ```
 
-> **Where to find these:** AWS Console → EC2 → Instances → click your instance → copy **Instance ID** and **Public IPv4**
+### 4) `requirements.txt` (always change)
+Include all runtime dependencies your workers need.
 
----
-
-### Step 4 — Update Your App (1 line)
-
-```python
-# Add at the top of app.py:
-import os
-PORT = int(os.getenv("PORT", 5000))
-
-# Change at the bottom:
-if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=PORT)  # ✅ was: port=5000
+At minimum for this tutorial setup:
+```txt
+flask==3.0.3
+celery==5.4.0
 ```
 
-That's it. This lets Unicorn run multiple copies on different ports.
+### 5) App entry scripts (always change)
+Each web script referenced in `unicorn_config.json` must:
+- exist
+- bind to env port
 
----
+Pattern:
+```python
+import os
+PORT = int(os.getenv("PORT", 5000))
+```
 
-### Step 5 — Add GitHub Secrets
+### 6) `celery_worker.py` + Celery app module (if using background tasks)
+`celery_worker.py` in this repo launches real Celery worker command via env.
+It requires:
+- `CELERY_APP` (required)
+- broker/backend and optional tuning vars (recommended)
 
-Go to your repo → **Settings → Secrets → Actions** and add:
+## Celery configuration in this setup
+`setup-production-REPO.ps1` configures `UnicornWorker` with:
+- `MODE=worker` (always)
+- optional propagation of:
+  - `CELERY_APP`
+  - `CELERY_BROKER_URL`
+  - `CELERY_RESULT_BACKEND`
+  - `CELERY_LOGLEVEL`
+  - `CELERY_POOL`
+  - `CELERY_CONCURRENCY`
+  - `CELERY_QUEUES`
+  - `CELERY_EXTRA_ARGS`
 
-| Secret | Value |
-|---|---|
-| `AK` | Your AWS Access Key ID |
-| `SAK` | Your AWS Secret Access Key |
+If `CELERY_APP` is missing, worker service starts but Celery process exits with error until configured.
 
-> **Where to get keys:** AWS Console → IAM → Users → Security credentials → Create access key
-
----
-
-### Step 6 — Deploy 🚀
-
+## Deploy steps
 ```bash
 git add .
-git commit -m "Add deployment system"
+git commit -m "Configure windows deployment"
 git push origin main
 ```
 
-GitHub Actions will automatically:
-1. Connect to your EC2 instances via AWS SSM
-2. Install Python, Git, Nginx, NSSM
-3. Clone your repo and install dependencies
-4. Start all workers and configure load balancing
-5. Open firewall port 80
+Workflow behavior:
+- triggers on push to `main` (and manual dispatch)
+- bootstraps Git on instance if missing
+- runs setup script
+- prints SSM stdout/stderr on failures
 
-**Your app is live in ~5 minutes at `http://YOUR_SERVER_IP`** 🎉
-
----
-
-## 🏗️ Architecture
-
-```
-Internet
-   │
-   ▼ Port 80
- Nginx (Load Balancer)
-   │
-   ├──▶ Worker 0  :5000
-   ├──▶ Worker 1  :5001
-   ├──▶ Worker 2  :5002
-   └──▶ Worker 3  :5003
-
-Unicorn Master (always watching)
-  └── Worker crashes? → Auto-restarts in 5s
-  └── Logs → logs/worker_0.log, logs/worker_1.log ...
-```
-
-**Deployment flow:**
-```
-git push
-   └── GitHub Actions triggered
-         └── For each server in instances.json:
-               ├── Connect via AWS SSM (no SSH)
-               ├── Clone repository
-               ├── Run setup-production-REPO.ps1
-               │     ├── Install Python 3.13, Git, Nginx, NSSM
-               │     ├── Copy project to C:\production
-               │     └── Install requirements.txt
-               └── Unicorn starts workers → Nginx load balances → App is live ✅
-```
----
-
-## ✨ What You Get
-
-| Feature | Details |
-|---|---|
-| 🚀 **Auto-deploy** | Triggers on every `git push` |
-| ⚖️ **Load balancing** | Round-robin across multiple workers |
-| 🔄 **Auto-restart** | Crashed workers restart in seconds |
-| 🟢 **Zero downtime** | Rolling deployments |
-| 🔐 **No SSH needed** | Uses AWS SSM |
-| 🪟 **Windows EC2** | Full Windows Server support |
-
----
-
-## 📚 File Reference
-
-<details>
-<summary><b>🔒 setup-production-REPO.ps1</b> — runs on every deploy</summary>
-
-- Installs Python 3.13, Git, Nginx, NSSM
-- Copies project to `C:\production`
-- Creates Python virtual environment
-- Installs packages from `requirements.txt`
-- Opens Windows Firewall port 80
-- Creates Windows services for auto-start
-
-**Change this?** ❌ Never — it's universal
-
-</details>
-
-<details>
-<summary><b>🔒 unicorn_master.py</b> — always running as a Windows service</summary>
-
-- Reads `unicorn_config.json` on startup
-- Starts all enabled worker processes
-- Sets `PORT` environment variable per worker
-- Monitors workers every 10 seconds
-- Auto-restarts crashed workers
-- Logs each worker to `logs/worker_name.log`
-
-**Change this?** ❌ Never — it's universal
-
-</details>
-
-<details>
-<summary><b>🔒 deploy.yml</b> — triggered on git push</summary>
-
-- Connects to every server in `instances.json` via AWS SSM
-- Downloads your repository
-- Runs `setup-production-REPO.ps1`
-- Cleans up temporary files
-
-**Change this?** ❌ Never — auto-detects your repo
-
-</details>
-
-<details>
-<summary><b>⚙️ unicorn_config.json</b> — define workers & ports</summary>
-
-**API + Background Worker example:**
-```json
-{
-  "services": [
-    {"name": "api_0",   "script": "api.py",    "port": 5000, "enabled": true},
-    {"name": "api_1",   "script": "api.py",    "port": 5001, "enabled": true},
-    {"name": "worker",  "script": "worker.py", "port": 5100, "enabled": true}
-  ],
-  "restart_delay": 10
-}
-```
-
-**Change this?** ✅ Yes — this is your main configuration
-
-</details>
-
-<details>
-<summary><b>⚙️ nginx.conf</b> — load balancer config</summary>
-
-Only change the `upstream` block to match your worker ports:
-```nginx
-upstream app_servers {
-    server 127.0.0.1:5000;
-    server 127.0.0.1:5001;
-    server 127.0.0.1:5002;
-    server 127.0.0.1:5003;
-}
-```
-
-**Change this?** ✅ Yes — keep ports in sync with `unicorn_config.json`
-
-</details>
-
-<details>
-<summary><b>⚙️ instances.json</b> — your EC2 server list</summary>
-
-```json
-{
-  "instances": [
-    {"name": "production", "instance_id": "i-0abc123", "server_ip": "13.1.1.1"},
-    {"name": "staging",    "instance_id": "i-0def456", "server_ip": "13.2.2.2"},
-    {"name": "dev",        "instance_id": "i-0ghi789", "server_ip": "13.3.3.3"}
-  ]
-}
-```
-
-**Change this?** ✅ Yes — add all environments you want to deploy to
-
-</details>
-
----
-
-## 🐛 Troubleshooting
-
-<details>
-<summary><b>App not accessible</b></summary>
-
+## Verify after deployment (SSM / PowerShell)
+Check services:
 ```powershell
-# 1. Check Windows Firewall
-Get-NetFirewallRule -DisplayName "Allow HTTP Port 80"
-
-# 2. Check services are running
 Get-Service UnicornMaster, UnicornWorker, NginxService
-
-# 3. Verify AWS Security Group has port 80 open
 ```
 
-</details>
-
-<details>
-<summary><b>Workers keep crashing</b></summary>
-
+Check Unicorn mode values:
 ```powershell
-# 1. Check worker logs
-Get-Content C:\production\logs\worker_0.log
-
-# 2. Verify your app reads PORT from environment
-PORT = int(os.getenv("PORT", 5000))
-
-# 3. Check all packages are in requirements.txt
+& C:\nssm\nssm.exe get UnicornMaster AppEnvironmentExtra
+& C:\nssm\nssm.exe get UnicornWorker AppEnvironmentExtra
 ```
 
-</details>
+Check worker processes:
+```powershell
+Get-CimInstance Win32_Process |
+  Where-Object { $_.CommandLine -match 'unicorn_master\.py|celery_worker\.py|celery(\.exe)?\s+worker' } |
+  Select-Object ProcessId, CommandLine
+```
 
-<details>
-<summary><b>502 Bad Gateway</b></summary>
+Check logs:
+```powershell
+Get-Content C:\production\logs\products_0.log -Tail 80
+Get-Content C:\production\logs\worker_0.log -Tail 80
+```
 
-- Workers aren't starting — check logs above
-- Port mismatch — verify ports in `nginx.conf` match `unicorn_config.json`
+## Troubleshooting quick map
+### Nginx default page appears
+- `nginx.conf` not copied/updated in `C:\nginx\conf\nginx.conf`
+- restart Nginx service and validate config
 
-</details>
+### 502 Bad Gateway
+- script path in `unicorn_config.json` does not exist
+- app crashes on startup (check `C:\production\logs\*.log`)
+- Nginx upstream ports do not match Unicorn web worker ports
 
----
+### UnicornWorker running but no tasks executed
+- `CELERY_APP` missing/incorrect
+- broker URL/backend invalid
+- wrong queue binding (`CELERY_QUEUES`)
 
-## ❓ FAQ
+### Deployment says success but app not updated
+- confirm workflow target instance in `instances.json`
+- inspect SSM output in Actions (stdout/stderr now printed on failure)
 
-**Do I need to change the universal files?**
-No. `setup-production-REPO.ps1`, `unicorn_master.py`, and `deploy.yml` work with any project as-is.
+## When to edit universal files
+### Edit rarely
+- `setup-production-REPO.ps1`: only for installer/service behavior changes
+- `unicorn_master.py`: only for supervisor logic changes
 
-**Works with Django / FastAPI?**
-Yes — any Python web framework. Just point `unicorn_config.json` to your entry file and make sure it reads `PORT` from the environment.
+### Edit when your infrastructure differs
+- `.github/workflows/deploy.yml`:
+  - branch trigger rules
+  - AWS region
+  - custom clone/auth strategy
+  - multi-account or environment-specific deploy logic
 
-**How do I scale up workers?**
-Add more entries to `unicorn_config.json` with unique ports, then add matching lines to `nginx.conf` upstream.
+## Recommended usage model
+For most teams:
+1. keep universal files stable
+2. change only config files and app code per project
+3. scale by adding/removing entries in `unicorn_config.json`
+4. keep `nginx.conf` synchronized with your selected topology
 
-**What if a worker crashes?**
-Unicorn automatically restarts it after `restart_delay` seconds (default: 5).
-
-**Do I need SSH?**
-No. Everything goes through AWS SSM — no open SSH port needed.
-
-**Can I deploy to staging + production?**
-Yes — add both to `instances.json` and every `git push` deploys to all of them.
-
-**My app uses a database — any special setup?**
-Add an `init_database.py` file. The setup script runs it automatically on first deployment.
-
----
-
-
+This gives a reusable Windows deployment pattern for almost any Python project with minimal per-project changes.
