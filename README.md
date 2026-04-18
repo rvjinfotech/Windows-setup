@@ -30,15 +30,14 @@
 
 ---
 
-## 📁 The 7 Files
+## 📁 The 6 Files
 
 ```
 your-project/
 ├── .github/workflows/
 │   └── deploy.yml                 ← 🔒 Universal — never change
-├── setup-production.ps1           ← 🔒 Universal — never change
+├── setup-production-REPO.ps1      ← 🔒 Universal — never change
 ├── unicorn_master.py              ← 🔒 Universal — never change
-└── setup-production-REPO.ps1      ← 🔒 Universal — never change
 ├── unicorn_config.json            ← ⚙️  Configure: define your workers
 ├── nginx.conf                     ← ⚙️  Configure: match worker ports
 └── instances.json                 ← ⚙️  Configure: add your EC2 servers
@@ -191,7 +190,7 @@ git push
          └── For each server in instances.json:
                ├── Connect via AWS SSM (no SSH)
                ├── Clone repository
-               ├── Run setup-production.ps1
+               ├── Run setup-production-REPO.ps1
                │     ├── Install Python 3.13, Git, Nginx, NSSM
                │     ├── Copy project to C:\production
                │     └── Install requirements.txt
@@ -215,7 +214,7 @@ git push
 ## 📚 File Reference
 
 <details>
-<summary><b>🔒 setup-production.ps1</b> — runs on every deploy</summary>
+<summary><b>🔒 setup-production-REPO.ps1</b> — runs on every deploy</summary>
 
 - Installs Python 3.13, Git, Nginx, NSSM
 - Copies project to `C:\production`
@@ -247,7 +246,7 @@ git push
 
 - Connects to every server in `instances.json` via AWS SSM
 - Downloads your repository
-- Runs `setup-production.ps1`
+- Runs `setup-production-REPO.ps1`
 - Cleans up temporary files
 
 **Change this?** ❌ Never — auto-detects your repo
@@ -319,7 +318,7 @@ upstream app_servers {
 Get-NetFirewallRule -DisplayName "Allow HTTP Port 80"
 
 # 2. Check services are running
-Get-Service UnicornMaster, NginxService
+Get-Service UnicornMaster, UnicornWorker, NginxService
 
 # 3. Verify AWS Security Group has port 80 open
 ```
@@ -354,7 +353,7 @@ PORT = int(os.getenv("PORT", 5000))
 ## ❓ FAQ
 
 **Do I need to change the universal files?**
-No. `setup-production.ps1`, `unicorn_master.py`, and `deploy.yml` work with any project as-is.
+No. `setup-production-REPO.ps1`, `unicorn_master.py`, and `deploy.yml` work with any project as-is.
 
 **Works with Django / FastAPI?**
 Yes — any Python web framework. Just point `unicorn_config.json` to your entry file and make sure it reads `PORT` from the environment.

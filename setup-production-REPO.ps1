@@ -148,6 +148,7 @@ if (Test-Path "$INSTALL_PATH\unicorn_master.py") {
         & C:\nssm\nssm.exe start UnicornMaster
         Write-Host "  [OK] UnicornMaster (web) installed" -ForegroundColor Green
     } else {
+        & C:\nssm\nssm.exe set UnicornMaster AppEnvironmentExtra MODE=web
         & C:\nssm\nssm.exe restart UnicornMaster
         Write-Host "  [OK] UnicornMaster (web) restarted" -ForegroundColor Green
     }
@@ -162,6 +163,7 @@ if (Test-Path "$INSTALL_PATH\unicorn_master.py") {
         & C:\nssm\nssm.exe start UnicornWorker
         Write-Host "  [OK] UnicornWorker installed" -ForegroundColor Green
     } else {
+        & C:\nssm\nssm.exe set UnicornWorker AppEnvironmentExtra MODE=worker
         & C:\nssm\nssm.exe restart UnicornWorker
         Write-Host "  [OK] UnicornWorker restarted" -ForegroundColor Green
     }
@@ -187,6 +189,7 @@ Write-Host "[9/9] Verifying installation..." -ForegroundColor Yellow
 Start-Sleep -Seconds 10
 
 $unicorn = Get-Service UnicornMaster -ErrorAction SilentlyContinue
+$worker = Get-Service UnicornWorker -ErrorAction SilentlyContinue
 $nginx = Get-Service NginxService -ErrorAction SilentlyContinue
 
 Write-Host ""
@@ -196,6 +199,9 @@ Write-Host "========================================" -ForegroundColor Cyan
 
 if ($unicorn) {
     Write-Host "UnicornMaster: $($unicorn.Status)" -ForegroundColor $(if($unicorn.Status -eq 'Running'){'Green'}else{'Red'})
+}
+if ($worker) {
+    Write-Host "UnicornWorker: $($worker.Status)" -ForegroundColor $(if($worker.Status -eq 'Running'){'Green'}else{'Red'})
 }
 if ($nginx) {
     Write-Host "NginxService: $($nginx.Status)" -ForegroundColor $(if($nginx.Status -eq 'Running'){'Green'}else{'Red'})

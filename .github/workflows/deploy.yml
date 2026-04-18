@@ -1,8 +1,10 @@
 name: Deploy
 
 on:
+  push:
+    branches: [main]
   workflow_dispatch:
-    # branches: [main]
+    # Manual trigger for ad-hoc deployments
   
 
 env:
@@ -63,7 +65,7 @@ jobs:
             DEPLOY_CMD=$(aws ssm send-command \
               --instance-ids "$ID" \
               --document-name "AWS-RunPowerShellScript" \
-              --parameters "commands=[\"cd C:\\\\; if(!(Test-Path temp)){New-Item -ItemType Directory -Path temp}; cd temp; git clone $REPO_URL project 2>&1; cd project; .\\\\setup-production.ps1; cd C:\\\\; Remove-Item -Recurse -Force temp\"]" \
+              --parameters "commands=[\"cd C:\\\\; if(!(Test-Path temp)){New-Item -ItemType Directory -Path temp}; cd temp; git clone $REPO_URL project 2>&1; cd project; .\\\\setup-production-REPO.ps1; cd C:\\\\; Remove-Item -Recurse -Force temp\"]" \
               --timeout-seconds 600 \
               --output text \
               --query "Command.CommandId" \
