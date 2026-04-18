@@ -41,8 +41,10 @@ jobs:
               ELAPSED=$((ELAPSED + 10))
             done
             
-            if [ "$STATUS" = "Failed" ]; then
-              echo "--- Errors ---"
+            if [ "$STATUS" != "Success" ]; then
+              echo "--- Stdout ---"
+              aws ssm get-command-invocation --instance-id "$INSTANCE_ID" --command-id "$CMD_ID" --query "StandardOutputContent" --output text --region $AWS_REGION
+              echo "--- Stderr ---"
               aws ssm get-command-invocation --instance-id "$INSTANCE_ID" --command-id "$CMD_ID" --query "StandardErrorContent" --output text --region $AWS_REGION
             fi
             
@@ -62,10 +64,13 @@ jobs:
             echo "=========================================="
 
             # Run setup script directly from repo
+            PS_COMMAND="Set-Location 'C:\\'; if(Test-Path 'temp'){Remove-Item -Recurse -Force 'temp'}; New-Item -ItemType Directory -Path 'temp' | Out-Null; if(!(Test-Path 'C:\\Program Files\\Git\\bin\\git.exe')){Invoke-WebRequest -Uri 'https://github.com/git-for-windows/git/releases/download/v2.47.1.windows.1/Git-2.47.1-64-bit.exe' -OutFile 'C:\\git.exe' -UseBasicParsing; Start-Process 'C:\\git.exe' -ArgumentList '/VERYSILENT /NORESTART /NOCANCEL /SP-' -Wait; Remove-Item 'C:\\git.exe' -Force}; Set-Location 'temp'; & 'C:\\Program Files\\Git\\bin\\git.exe' clone $REPO_URL project; if(!(Test-Path '.\\project\\setup-production-REPO.ps1')){throw 'clone/setup script missing'}; Set-Location 'project'; .\\setup-production-REPO.ps1; Set-Location 'C:\\'; Remove-Item -Recurse -Force 'temp'"
+            PARAMS=$(jq -cn --arg cmd "$PS_COMMAND" '{commands:[$cmd]}')
+
             DEPLOY_CMD=$(aws ssm send-command \
               --instance-ids "$ID" \
               --document-name "AWS-RunPowerShellScript" \
-              --parameters "commands=[\"cd C:\\\\; if(!(Test-Path temp)){New-Item -ItemType Directory -Path temp}; cd temp; git clone $REPO_URL project 2>&1; cd project; .\\\\setup-production-REPO.ps1; cd C:\\\\; Remove-Item -Recurse -Force temp\"]" \
+              --parameters "$PARAMS" \
               --timeout-seconds 600 \
               --output text \
               --query "Command.CommandId" \
