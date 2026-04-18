@@ -20,6 +20,8 @@ Do **not** copy tutorial app files. Use your own app code.
 
 ### Add this only if you use Celery
 7. `celery_worker.py`
+8. `celery_app.py`
+9. `celery_config.json`
 
 ### Optional reference files
 - `templates/nginx-TEMPLATE.conf`
@@ -31,11 +33,13 @@ Do **not** copy tutorial app files. Use your own app code.
 - `setup-production-REPO.ps1`
 - `unicorn_master.py`
 - `celery_worker.py` (if using Celery)
+- `celery_app.py` (if using Celery)
 
 ### Always edit per project
 - `unicorn_config.json`
 - `nginx.conf`
 - `instances.json`
+- `celery_config.json` (if using Celery)
 
 ## 3) How the flow works
 1. Workflow sends SSM command to Windows EC2.
@@ -171,23 +175,46 @@ Most projects keep this file as-is. Edit only when needed:
 - change Nginx version
 - add extra install steps specific to your org
 
-### 4.6 `celery_worker.py` (if using Celery)
-This launcher starts:
-- `python -m celery -A <CELERY_APP> worker ...`
+### 4.6 Celery universal setup (Redis / Sidekiq-style)
+If you want background jobs, keep these three files:
+- `celery_worker.py` (starts the worker process)
+- `celery_app.py` (default universal Celery app)
+- `celery_config.json` (the only file you usually edit)
 
-### Environment variables used
-- Required:
-  - `CELERY_APP`
-- Optional:
-  - `CELERY_BROKER_URL`
-  - `CELERY_RESULT_BACKEND`
-  - `CELERY_LOGLEVEL`
-  - `CELERY_POOL` (Windows usually `solo`)
-  - `CELERY_CONCURRENCY`
-  - `CELERY_QUEUES`
-  - `CELERY_EXTRA_ARGS`
+### Edit only `celery_config.json`
+```json
+{
+  "celery_app": "celery_app:celery",
+  "broker_url": "redis://127.0.0.1:6379/0",
+  "result_backend": "redis://127.0.0.1:6379/1",
+  "loglevel": "info",
+  "pool": "solo",
+  "concurrency": "",
+  "queues": "",
+  "extra_args": "",
+  "imports": []
+}
+```
 
-`setup-production-REPO.ps1` automatically applies these env vars to `UnicornWorker` service if they exist in server environment.
+### Required values
+- `celery_app`: Celery app path (default is `celery_app:celery`, already included in this kit)
+- `broker_url`: your queue broker URL (Redis/RabbitMQ)
+- `result_backend`: where task results are stored
+
+### Optional values
+- `loglevel`, `pool`, `concurrency`, `queues`, `extra_args`, `imports`
+
+### How it works
+1. `setup-production-REPO.ps1` reads `celery_config.json` and attaches those values to `UnicornWorker`.
+2. `celery_worker.py` also reads `celery_config.json` as fallback.
+3. Worker starts with: `python -m celery -A <CELERY_APP> worker ...`
+
+No manual machine-level Celery env setup is required for normal usage.
+
+### If you later create your own Celery app module
+Only update `celery_config.json`:
+- set `celery_app` to your module path (example: `myproject.celery_app:celery`)
+- set `imports` with your task modules (example: `["myproject.tasks"]`)
 
 ## 5) What not to change often
 - `unicorn_master.py`: core supervisor logic
@@ -236,9 +263,9 @@ Get-Content C:\production\logs\worker_0.log -Tail 80
 - path routing not separated by service upstreams
 
 ### Celery service running but no jobs execute
-- `CELERY_APP` incorrect/missing
+- `celery_config.json` has wrong `celery_app` / broker / backend
 - broker/backend not reachable
-- queue names mismatch
+- `imports` or queue names mismatch with your task code
 
 ## 8) Practical usage pattern
 For each new Python project:
@@ -247,7 +274,7 @@ For each new Python project:
    - `unicorn_config.json`
    - `nginx.conf`
    - `instances.json`
-3. Add Celery only if needed (`celery_worker.py` + env vars).
+3. Add Celery only if needed (`celery_worker.py` + `celery_app.py` + `celery_config.json`).
 4. Keep core universal scripts stable unless you have infra-level reasons to change them.
 
 This keeps deployment setup repeatable across projects while still giving flexible worker/routing control.

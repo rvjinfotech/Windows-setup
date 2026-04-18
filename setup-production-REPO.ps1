@@ -32,6 +32,61 @@ function Get-FirstAvailableEnvValue {
     return $null
 }
 
+function Get-CeleryConfigObject {
+    param([string]$ConfigPath)
+
+    if (!(Test-Path $ConfigPath)) {
+        return $null
+    }
+
+    try {
+        $rawConfig = Get-Content $ConfigPath -Raw
+        if ([string]::IsNullOrWhiteSpace($rawConfig)) {
+            return $null
+        }
+        return $rawConfig | ConvertFrom-Json
+    } catch {
+        Write-Host "  [WARN] Failed to parse celery_config.json. Falling back to environment values." -ForegroundColor Yellow
+        return $null
+    }
+}
+
+function Get-CeleryConfigValue {
+    param(
+        $Config,
+        [string]$PropertyName
+    )
+
+    if ($null -eq $Config) {
+        return $null
+    }
+
+    $property = $Config.PSObject.Properties[$PropertyName]
+    if ($null -eq $property) {
+        return $null
+    }
+
+    $value = $property.Value
+    if ($null -eq $value) {
+        return $null
+    }
+
+    if ($value -is [System.Array]) {
+        $joinedValue = ($value | ForEach-Object { [string]$_ } | Where-Object { ![string]::IsNullOrWhiteSpace($_) }) -join ","
+        if ([string]::IsNullOrWhiteSpace($joinedValue)) {
+            return $null
+        }
+        return $joinedValue
+    }
+
+    $textValue = [string]$value
+    if ([string]::IsNullOrWhiteSpace($textValue)) {
+        return $null
+    }
+
+    return $textValue.Trim()
+}
+
 Write-Host "========================================" -ForegroundColor Cyan
 Write-Host "Universal Production Setup" -ForegroundColor Cyan
 Write-Host "========================================" -ForegroundColor Cyan
@@ -183,21 +238,46 @@ if (Test-Path "$INSTALL_PATH\unicorn_master.py") {
         "CELERY_POOL",
         "CELERY_CONCURRENCY",
         "CELERY_QUEUES",
-        "CELERY_EXTRA_ARGS"
+        "CELERY_EXTRA_ARGS",
+        "CELERY_IMPORTS"
     )
+    $celeryConfigKeyMap = @{
+        "CELERY_APP" = "celery_app"
+        "CELERY_BROKER_URL" = "broker_url"
+        "CELERY_RESULT_BACKEND" = "result_backend"
+        "CELERY_LOGLEVEL" = "loglevel"
+        "CELERY_POOL" = "pool"
+        "CELERY_CONCURRENCY" = "concurrency"
+        "CELERY_QUEUES" = "queues"
+        "CELERY_EXTRA_ARGS" = "extra_args"
+        "CELERY_IMPORTS" = "imports"
+    }
+
+    $celeryConfigPath = "$INSTALL_PATH\\celery_config.json"
+    $celeryConfig = Get-CeleryConfigObject -ConfigPath $celeryConfigPath
+    if ($null -ne $celeryConfig) {
+        Write-Host "  [OK] Loaded celery_config.json from project" -ForegroundColor Green
+    }
 
     foreach ($envName in $celeryEnvNames) {
-        $envValue = Get-FirstAvailableEnvValue -Name $envName
+        $configProperty = $celeryConfigKeyMap[$envName]
+        $configValue = Get-CeleryConfigValue -Config $celeryConfig -PropertyName $configProperty
+        $envValue = $configValue
+
+        if ([string]::IsNullOrWhiteSpace($envValue)) {
+            $envValue = Get-FirstAvailableEnvValue -Name $envName
+        }
+
         if (![string]::IsNullOrWhiteSpace($envValue)) {
             $workerEnv += "$envName=$envValue"
         }
     }
 
     if (($workerEnv | Where-Object { $_ -like "CELERY_APP=*" }).Count -eq 0) {
-        Write-Host "  [WARN] CELERY_APP not found in Process/Machine/User environment. Worker will exit until set." -ForegroundColor Yellow
-    } else {
-        Write-Host "  [OK] Celery environment detected for UnicornWorker" -ForegroundColor Green
+        $workerEnv += "CELERY_APP=celery_app:celery"
+        Write-Host "  [OK] CELERY_APP not set. Using default celery_app:celery" -ForegroundColor Yellow
     }
+    Write-Host "  [OK] Celery settings prepared for UnicornWorker" -ForegroundColor Green
     
     # Setup Worker service
     $workerService = Get-Service UnicornWorker -ErrorAction SilentlyContinue
