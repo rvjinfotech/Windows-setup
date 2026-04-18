@@ -1,7 +1,7 @@
-# Windows Python Deployment (Manual Rails Unicorn/Puma Style)
-This kit is designed to run Python apps on Windows EC2 in a Rails Unicorn/Puma-style operational model (manual, config-driven):
+# Windows Python Deployment (Universal Web Workers + Celery)
+This kit is designed to run Python apps on Windows EC2 in a universal config-driven model:
 - Nginx in front
-- multiple app workers behind it
+- multiple web workers behind it
 - automatic worker restart
 - optional Celery worker service for background jobs/concurrency
 
@@ -50,6 +50,7 @@ Do **not** copy tutorial app files. Use your own app code.
 4. `unicorn_master.py` reads `unicorn_config.json`, starts matching services for that mode.
 5. Nginx routes incoming HTTP traffic to configured web worker ports.
 6. Celery worker runs separately (if configured).
+7. Default routing pattern is one shared upstream pool (no app-path routing required).
 
 ## 4) Per-file instructions (exactly what to change)
 ### 4.1 `unicorn_config.json` (main scaling file)
@@ -60,7 +61,7 @@ This file controls:
 - mode (`web` or `worker`)
 
 ### Fields you edit
-- `services[].name`: any readable name (`api_0`, `products_1`, etc.)
+- `services[].name`: any readable name (`api_0`, `api_1`, etc.)
 - `services[].script`: path to your real Python entry script
 - `services[].port`: unique internal port
 - `services[].mode`:
@@ -82,29 +83,12 @@ This file controls:
 }
 ```
 
-### Example B: microservices routing model
-```json
-{
-  "services": [
-    {"name": "products_0", "script": "app/products/app.py", "port": 5010, "enabled": true},
-    {"name": "products_1", "script": "app/products/app.py", "port": 5011, "enabled": true},
-    {"name": "orders_0", "script": "app/orders/app.py", "port": 5020, "enabled": true},
-    {"name": "orders_1", "script": "app/orders/app.py", "port": 5021, "enabled": true},
-    {"name": "users_0", "script": "app/users/app.py", "port": 5030, "enabled": true},
-    {"name": "users_1", "script": "app/users/app.py", "port": 5031, "enabled": true},
-    {"name": "worker_0", "script": "celery_worker.py", "port": 5100, "mode": "worker", "enabled": true}
-  ],
-  "restart_delay": 5
-}
-```
-
 ### Required rule
 Every `script` path in `unicorn_config.json` must exist in your project.
 
 ### 4.2 `nginx.conf` (routing + load balancing)
 Nginx must match the web ports in `unicorn_config.json`.
-
-### Option A: single app, all traffic to one pool
+Default universal routing pattern:
 ```nginx
 upstream app_servers {
     server 127.0.0.1:5000;
@@ -119,31 +103,6 @@ server {
     location / {
         proxy_pass http://app_servers;
     }
-}
-```
-
-### Option B: microservices path routing
-```nginx
-upstream products_servers {
-    server 127.0.0.1:5010;
-    server 127.0.0.1:5011;
-}
-upstream orders_servers {
-    server 127.0.0.1:5020;
-    server 127.0.0.1:5021;
-}
-upstream users_servers {
-    server 127.0.0.1:5030;
-    server 127.0.0.1:5031;
-}
-
-server {
-    listen 80;
-    server_name _;
-
-    location /products/ { proxy_pass http://products_servers/; }
-    location /orders/   { proxy_pass http://orders_servers/; }
-    location /users/    { proxy_pass http://users_servers/; }
 }
 ```
 
@@ -216,6 +175,12 @@ Only update `celery_config.json`:
 - set `celery_app` to your module path (example: `myproject.celery_app:celery`)
 - set `imports` with your task modules (example: `["myproject.tasks"]`)
 
+### Project-specific Celery changes checklist
+- set `broker_url`
+- set `result_backend`
+- optionally set `imports`, `queues`, and `concurrency`
+- only change `celery_app` if you use a custom Celery app module
+
 ## 5) What not to change often
 - `unicorn_master.py`: core supervisor logic
 - most of `setup-production-REPO.ps1`: installer/service boilerplate
@@ -238,13 +203,13 @@ Get-Service UnicornMaster, UnicornWorker, NginxService
 ### Check running worker processes
 ```powershell
 Get-CimInstance Win32_Process |
-  Where-Object { $_.CommandLine -match 'unicorn_master\.py|celery_worker\.py|celery(\.exe)?\s+worker' } |
+  Where-Object { $_.CommandLine -match 'unicorn_master\.py|celery_worker\.py|-m\s+celery.*\sworker' } |
   Select-Object ProcessId, CommandLine
 ```
 
 ### Check logs
 ```powershell
-Get-Content C:\production\logs\products_0.log -Tail 80
+Get-Content C:\production\logs\api_0.log -Tail 80
 Get-Content C:\production\logs\worker_0.log -Tail 80
 ```
 
@@ -258,9 +223,9 @@ Get-Content C:\production\logs\worker_0.log -Tail 80
 - your project `nginx.conf` was not copied to `C:\nginx\conf\nginx.conf`
 - Nginx service not restarted after config update
 
-### Requests hitting wrong service
-- your `location` blocks in `nginx.conf` are too broad
-- path routing not separated by service upstreams
+### Requests not balancing across workers
+- `nginx.conf` upstream ports do not match enabled web workers
+- one or more web workers are crashing (check logs)
 
 ### Celery service running but no jobs execute
 - `celery_config.json` has wrong `celery_app` / broker / backend
