@@ -1,3 +1,7 @@
+# Reference Files: 
+-  [Detailed Steps to Deploy](https://docs.google.com/document/d/1YoqeTIpcZmGiCalKossWV7onkgXFll-XgzdVibwYamg/edit?usp=sharing)
+-  [Detailed Summary of each file](https://docs.google.com/document/d/1sHotGYE1HjRLNvB_RYkTf6SDnxJRIUaUV3OL5lvNBMU/edit?usp=sharing)
+
 # Windows Python Deployment (Universal Web Workers + Celery)
 This kit is designed to run Python apps on Windows EC2 in a universal config-driven model:
 - Nginx in front
