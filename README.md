@@ -6,9 +6,115 @@ This kit is designed to run Python apps on Windows EC2 in a universal config-dri
 - optional Celery worker service for background jobs/concurrency
 
 The goal is simple: copy the deployment kit files into your Python project, change a few config values, deploy.
+Setup Instance: 
+### SSM access — attach IAM role to your EC2
+ 
+For `deploy.yml` to send SSM commands to your instance, the EC2 must have an IAM role with SSM permissions.
+ 
+**Step 1 — Create IAM Role (one-time)**
+1. Go to **IAM → Roles → Create role**
+2. Trusted entity: `AWS service` → `EC2`
+3. Attach policy: `AmazonSSMManagedInstanceCore`
+4. Name it e.g. `EC2SSMRole` → Create
+**Step 2 — Attach role to your EC2**
+1. Go to **EC2 → Instances** → create new instance → choose all the configurations
+2. **Advance options → IAM instance profile → Select the role we created**
+3. Select `EC2SSMRole` → create instance
+
+**If already created Instance**
+
+1. Go to **EC2 → Instances** → select your instance
+2. **Actions → Security → Modify IAM role**
+3. Select `EC2SSMRole` → Update
+**Step 3 — Verify SSM can see the instance**
+```bash
+aws ssm describe-instance-information --region YOUR_REGION
+# your instance should appear with PingStatus: Online
+```
+ 
+**Step 4 — GitHub Actions also needs AWS access**
+Add these secrets to your repo (**Settings → Secrets → Actions**):
+- `AWS_ACCESS_KEY_ID`
+- `AWS_SECRET_ACCESS_KEY`
+- `AWS_REGION`
+The IAM user for those keys and to deploy needs this policy:
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": [
+        "ssm:SendCommand",
+        "ssm:GetCommandInvocation",
+        "ssm:ListCommandInvocations",
+        "ssm:DescribeInstanceInformation"
+      ],
+      "Resource": "*"
+    }
+  ]
+}
+```
+**These are the basic permission, if the project uses any other services, the permissions will update accordingly**
+ 
+> ℹ️ SSM Agent must be running on the EC2. It comes pre-installed on Windows Server 2016+ AMIs. Verify with: `Get-Service AmazonSSMAgent` in PowerShell.
+ 
+## 0) How the full project works (workflow)
+
+```
+GitHub push
+    │
+    ▼
+deploy.yml (GitHub Actions)
+    │  sends SSM command to EC2
+    ▼
+setup-production-REPO.ps1 (runs on Windows EC2)
+    │  installs Python, Nginx, NSSM services
+    │  reads unicorn_config.json → registers UnicornMaster + UnicornWorker services
+    │  reads celery_config.json  → attaches Celery env vars to UnicornWorker (if used)
+    ▼
+UnicornMaster (Windows service, MODE=web)
+    │  unicorn_master.py → spawns web worker processes on ports 5000, 5001, 5002...
+    │  each process runs YOUR app.py, auto-restarts on crash
+    ▼
+Nginx (Windows service)
+    │  nginx.conf → load-balances HTTP traffic across web worker ports
+    ▼
+UnicornWorker (Windows service, MODE=worker)       [only if Celery is enabled]
+    │  unicorn_master.py → spawns celery_worker.py
+    │  celery_worker.py reads celery_config.json → starts Celery worker
+    ▼
+Redis / RabbitMQ broker                            [only if Celery is enabled]
+    │  queues background tasks from your app
+    ▼
+Celery executes tasks from your task modules
+```
+
+**Key rule:** Nginx ports ↔ `unicorn_config.json` web worker ports must always match.
+
+## 0.1) File roles at a glance
+
+| File | Type | Change? |
+|---|---|---|
+| `unicorn_master.py` | Universal | ❌ Never |
+| `celery_worker.py` | Universal | ❌ Never |
+| `celery_app.py` | Universal | ❌ Never |
+| `setup-production-REPO.ps1` | Universal | 🔧 Only for infra changes (Python/Nginx version, install path) |
+| `.github/workflows/deploy.yml` | Universal | 🔧 Only `AWS_REGION` and trigger branch |
+| `unicorn_config.json` | Config | ✅ Every project — set your script path + ports |
+| `nginx.conf` | Config | ✅ Every project — match ports to workers |
+| `instances.json` | Config | ✅ Every project — set your EC2 instance ID + IP |
+| `celery_config.json` | Config | ✅ If using Celery — set broker URL + app path |
+| `app/your_app.py` | **Your code** | ✅ This is your Python entry script |
+| `your_tasks.py` | **Your code** | ✅ Your Celery task definitions (if using Celery) |
+
+## 0.2) What's included as an example
+The repo ships with a minimal working example in `app/orders/app.py` (a Flask app with `/` and `/health` routes).
+**This is a reference only — replace it with your own app code.**
+The `unicorn_config.json` and `nginx.conf` already point to it so you can see the full setup end-to-end before swapping in your own project.
 
 ## 1) Files to copy into every project
-Do **not** copy tutorial app files. Use your own app code.
+Do **not** copy the example app (`app/` folder). Use your own app code.
 
 ### Core deployment kit (copy in every project)
 1. `.github/workflows/deploy.yml`
@@ -59,6 +165,8 @@ This file controls:
 - script path per worker
 - port per worker
 - mode (`web` or `worker`)
+
+> ℹ️ The repo ships with `"script": "app/orders/app.py"` pointing to the example app. **Change this to your own entry script path before deploying.**
 
 ### Fields you edit
 - `services[].name`: any readable name (`api_0`, `api_1`, etc.)
@@ -112,10 +220,12 @@ Nginx upstream ports must match **enabled web workers** exactly.
 ### 4.3 `instances.json` (deploy targets)
 Set the EC2 instances to deploy to.
 
+> ⚠️ The repo currently contains a real instance ID and IP (`i-04ef5305404485929` / `13.201.79.36`). **Replace both with your own before committing.**
+
 ```json
 {
   "instances": [
-    {"name": "production", "instance_id": "i-xxxxxxxxxxxxxxxxx", "server_ip": "13.xxx.xxx.xxx"}
+    {"name": "production", "instance_id": "i-xxxxxxxxxxxxxxxxx", "server_ip": "YOUR.EC2.IP.HERE"}
   ]
 }
 ```
@@ -235,11 +345,12 @@ Get-Content C:\production\logs\worker_0.log -Tail 80
 ## 8) Practical usage pattern
 For each new Python project:
 1. Copy the kit files listed in section 1.
-2. Edit only the three core configs first:
-   - `unicorn_config.json`
-   - `nginx.conf`
-   - `instances.json`
-3. Add Celery only if needed (`celery_worker.py` + `celery_app.py` + `celery_config.json`).
-4. Keep core universal scripts stable unless you have infra-level reasons to change them.
+2. Add your own app code (do **not** copy `app/orders/app.py` — that's the example).
+3. Edit the three core configs:
+   - `unicorn_config.json` — point `script` to your entry file
+   - `nginx.conf` — match upstream ports to your workers
+   - `instances.json` — set your EC2 `instance_id` and `server_ip`
+4. Add Celery only if needed (`celery_worker.py` + `celery_app.py` + `celery_config.json`).
+5. Keep core universal scripts stable unless you have infra-level reasons to change them.
 
 This keeps deployment setup repeatable across projects while still giving flexible worker/routing control.
