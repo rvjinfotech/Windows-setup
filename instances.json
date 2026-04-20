@@ -1,9 +1,9 @@
 {
   "instances": [
     {
-      "name": "windows-test-setup",
-      "instance_id": "i-055f18d6c38dc9156",
-      "server_ip": "43.205.239.234"
+      "name": "window",
+      "instance_id": "i-0665fe0907fd0c11c",
+      "server_ip": "13.206.124.230"
     }
   ]
 }
