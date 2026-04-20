@@ -51,6 +51,8 @@ jobs:
             [ "$STATUS" = "Success" ]
           }
             
+          aws ssm describe-instance-information --region $AWS_REGION
+ 
           INSTANCES=$(cat instances.json | jq -c '.instances[]')
 
           for instance in $INSTANCES; do
