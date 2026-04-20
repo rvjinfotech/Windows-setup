@@ -10,6 +10,7 @@
 $ErrorActionPreference = "Stop"
 $INSTALL_PATH = "C:\production"
 $REPO_PATH = Get-Location
+Start-Transcript -Path "C:\deployment.log" -Append
 
 function Get-FirstAvailableEnvValue {
     param([string]$Name)
@@ -337,3 +338,4 @@ Write-Host ""
 Write-Host "Project installed at: $INSTALL_PATH"
 Write-Host "Access your app at: http://YOUR_SERVER_IP"
 Write-Host ""
+Stop-Transcript

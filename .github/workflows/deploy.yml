@@ -36,6 +36,11 @@ jobs:
             while [ $ELAPSED -lt $MAX_WAIT ]; do
               STATUS=$(aws ssm get-command-invocation --instance-id "$INSTANCE_ID" --command-id "$CMD_ID" --query "Status" --output text --region $AWS_REGION 2>/dev/null || echo "Pending")
               echo "  $STATUS (${ELAPSED}s)"
+              echo "--- Live Output ($INSTANCE_ID) ---"
+              aws ssm get-command-invocation \
+                --instance-ids "$INSTANCE_ID" \
+                --document-name "AWS-RunPowerShellScript" \
+                --parameters 'commands=["Get-Content C:\\deployment.log -Tail 20"]'
               [[ "$STATUS" == "Success" || "$STATUS" == "Failed" || "$STATUS" == "TimedOut" ]] && break
               sleep 10
               ELAPSED=$((ELAPSED + 10))
