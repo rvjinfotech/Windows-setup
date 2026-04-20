@@ -20,8 +20,9 @@ For `deploy.yml` to send SSM commands to your instance, the EC2 must have an IAM
 2. Trusted entity: `AWS service` → `EC2`
 3. Attach policy: `AmazonSSMManagedInstanceCore`
 4. Name it e.g. `EC2SSMRole` → Create
-**Step 2 — Attach role to your EC2**
-1. Go to **EC2 → Instances** → create new instance → choose all the configurations
+
+**Step 2 — Attach role and security group to your EC2**
+1. Go to **EC2 → Instances** → create new instance → choose all the configurations → Select the security group with the port 80 and 443 inbound allowed or create new one
 2. **Advance options → IAM instance profile → Select the role we created**
 3. Select `EC2SSMRole` → create instance
 
