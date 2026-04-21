@@ -22,7 +22,8 @@ For `deploy.yml` to send SSM commands to your instance, the EC2 must have an IAM
 4. Name it e.g. `EC2SSMRole` → Create
 
 **Step 2 — Attach role and security group to your EC2**
-1. Go to **EC2 → Instances** → create new instance → choose all the configurations → Select the security group with the port 80 and 443 inbound allowed or create new one
+1. Go to **EC2 → Instances** → create new instance → choose all the configurations → Select the security group with the port 22, 80 and 443 inbound allowed or create new one
+2. Create a new **key pair** or use the existing one(keep the key pair in your local machine at a safe place)
 2. **Advance options → IAM instance profile → Select the role we created**
 3. Select `EC2SSMRole` → create instance
 
@@ -41,7 +42,7 @@ aws ssm describe-instance-information --region YOUR_REGION
 Add these secrets to your repo (**Settings → Secrets → Actions**):
 - `Access_Key` (AWS Access Key ID)
 - `SecretAccess_Key` (AWS Secret Access Key)
-- `EC2_KEY` (EC2 private key `.pem` contents — used for SSH/SCP)
+- `EC2_KEY` (EC2 private key `.pem` contents — used for SSH/SCP)(it is the content of the **key pair** that we saved in our local machine)
 The IAM user for those keys and to deploy needs this policy:
 ```json
 {
@@ -235,8 +236,7 @@ Set the EC2 instances to deploy to.
 
 ### 4.4 `.github/workflows/deploy.yml` (usually keep, optional edits)
 Usually you only edit:
-- `env.AWS_REGION`
-- trigger branches under `on.push.branches`
+- `env.AWS_REGION` **Currently the ap-south-1 for default**
 
 Everything else can stay as provided.
 
