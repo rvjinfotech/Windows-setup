@@ -18,7 +18,7 @@ jobs:
         uses: aws-actions/configure-aws-credentials@v4
         with:
           aws-access-key-id: ${{ secrets.Access_Key }}
-          aws-secret-access-key: ${{ secrets.SAKSecretAccess_Key }}
+          aws-secret-access-key: ${{ secrets.SecretAccess_Key }}
           aws-region: ${{ env.AWS_REGION }}
 
       # 🔥 FIX 1: Proper key formatting + generate public key
