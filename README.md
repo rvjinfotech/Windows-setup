@@ -136,22 +136,13 @@ Do **not** copy the example app (`app/` folder). Use your own app code.
 9. `celery_app.py`
 10. `celery_config.json`
 
-
-## 2) Quick “what to edit” map
-### Usually copy as-is (minor optional edits)
-- `.github/workflows/deploy.yml`
-- `setup-production-REPO.ps1`
-- `unicorn_master.py`
-- `celery_worker.py` (if using Celery)
-- `celery_app.py` (if using Celery)
-
 ### Always edit per project
 - `unicorn_config.json`
 - `nginx.conf`
 - `instances.json`
 - `celery_config.json` (if using Celery)
 
-## 3) How the flow works
+## 2) How the flow works
 1. Workflow sends SSM command to Windows EC2.
 2. `setup-production-REPO.ps1` installs runtime + services.
 3. Two Windows services run Unicorn in separate modes:
@@ -162,8 +153,8 @@ Do **not** copy the example app (`app/` folder). Use your own app code.
 6. Celery worker runs separately (if configured).
 7. Default routing pattern is one shared upstream pool (no app-path routing required).
 
-## 4) Per-file instructions (exactly what to change)
-### 4.1 `unicorn_config.json` (main scaling file)
+## 3) Per-file instructions (exactly what to change)
+### 3.1 `unicorn_config.json` (main scaling file)
 This file controls:
 - number of workers
 - script path per worker
@@ -198,7 +189,7 @@ This file controls:
 ### Required rule
 Every `script` path in `unicorn_config.json` must exist in your project.
 
-### 4.2 `nginx.conf` (routing + load balancing)
+### 3.2 `nginx.conf` (routing + load balancing)
 Nginx must match the web ports in `unicorn_config.json`.
 Default universal routing pattern:
 ```nginx
@@ -221,7 +212,7 @@ server {
 ### Required rule
 Nginx upstream ports must match **enabled web workers** exactly.
 
-### 4.3 `instances.json` (deploy targets)
+### 3.3 `instances.json` (deploy targets)
 Set the EC2 instances to deploy to.
 
 > ⚠️ The repo currently contains a real instance ID and IP (`i-04ef5305404485929` / `13.201.79.36`). **Replace both with your own before committing.**
@@ -234,7 +225,7 @@ Set the EC2 instances to deploy to.
 }
 ```
 
-### 4.4 `.github/workflows/deploy.yml` (usually keep, optional edits)
+### 3.4 `.github/workflows/deploy.yml` (usually keep, optional edits)
 Usually you only edit:
 - `env.AWS_REGION` **Currently the ap-south-1 for default**
 
@@ -247,7 +238,7 @@ Everything else can stay as provided.
 
 **Required secret:** `EC2_KEY` — paste the full contents of your `.pem` private key. The workflow derives the public key automatically via `ssh-keygen -y`.
 
-### 4.5 `setup-production-REPO.ps1` (usually keep, edit only if needed)
+### 3.5 `setup-production-REPO.ps1` (usually keep, edit only if needed)
 Most projects keep this file as-is. Edit only when needed:
 - change install directory: `$INSTALL_PATH`
 - change Python version URL/path
@@ -256,7 +247,7 @@ Most projects keep this file as-is. Edit only when needed:
 
 **NSSM:** The script checks for `tools/nssm.exe` in your repo first and uses that — no download needed. Always commit `tools/nssm.exe` (win64) to avoid external dependency failures.
 
-### 4.6 Celery universal setup (Redis / Sidekiq-style)
+### 3.6 Celery universal setup (Redis / Sidekiq-style)
 If you want background jobs, keep these three files:
 - `celery_worker.py` (starts the worker process)
 - `celery_app.py` (default universal Celery app)
