@@ -1,11 +1,7 @@
 name: Deploy
 
 on:
-  push:
-    branches: [main]
   workflow_dispatch:
-    # Manual trigger for ad-hoc deployments
-  
 
 env:
   AWS_REGION: ap-south-1
@@ -25,71 +21,128 @@ jobs:
           aws-secret-access-key: ${{ secrets.SAK }}
           aws-region: ${{ env.AWS_REGION }}
 
-      - name: Deploy to all instances
+      # 🔥 FIX 1: Proper key formatting + generate public key
+      - name: Setup SSH key
         run: |
-          wait_for_ssm() {
-            local CMD_ID=$1
-            local INSTANCE_ID=$2
-            local MAX_WAIT=600
-            local ELAPSED=0
-            
-            while [ $ELAPSED -lt $MAX_WAIT ]; do
-              STATUS=$(aws ssm get-command-invocation --instance-id "$INSTANCE_ID" --command-id "$CMD_ID" --query "Status" --output text --region $AWS_REGION 2>/dev/null || echo "Pending")
-              echo "  $STATUS (${ELAPSED}s)"
-              [[ "$STATUS" == "Success" || "$STATUS" == "Failed" || "$STATUS" == "TimedOut" ]] && break
-              sleep 10
-              ELAPSED=$((ELAPSED + 10))
-            done
-            
-            if [ "$STATUS" != "Success" ]; then
-              echo "--- Stdout ---"
-              aws ssm get-command-invocation --instance-id "$INSTANCE_ID" --command-id "$CMD_ID" --query "StandardOutputContent" --output text --region $AWS_REGION
-              echo "--- Stderr ---"
-              aws ssm get-command-invocation --instance-id "$INSTANCE_ID" --command-id "$CMD_ID" --query "StandardErrorContent" --output text --region $AWS_REGION
-            fi
-            
-            [ "$STATUS" = "Success" ]
-          }
-            
-          aws ssm describe-instance-information --region $AWS_REGION
- 
+          printf "%s" "${{ secrets.EC2_KEY }}" > key.pem
+          chmod 600 key.pem
+          ssh-keygen -y -f key.pem > key.pub
+
+      - name: Deploy to all instances (SSM + SCP)
+        run: |
+          PUB_KEY=$(cat key.pub)
+          PUB_KEY_ESCAPED=$(echo "$PUB_KEY" | sed "s/'/\`'/g")
           INSTANCES=$(cat instances.json | jq -c '.instances[]')
 
           for instance in $INSTANCES; do
             NAME=$(echo $instance | jq -r '.name')
             ID=$(echo $instance | jq -r '.instance_id')
             IP=$(echo $instance | jq -r '.server_ip')
-            REPO_URL="https://github.com/${{ github.repository }}.git"
 
             echo "=========================================="
             echo "Deploying to $NAME ($IP)"
             echo "=========================================="
 
-            # Run setup script directly from repo
-            PS_COMMAND="Set-Location 'C:\\'; if(Test-Path 'temp'){Remove-Item -Recurse -Force 'temp'}; New-Item -ItemType Directory -Path 'temp' | Out-Null; if(!(Test-Path 'C:\\Program Files\\Git\\bin\\git.exe')){Invoke-WebRequest -Uri 'https://github.com/git-for-windows/git/releases/download/v2.47.1.windows.1/Git-2.47.1-64-bit.exe' -OutFile 'C:\\git.exe' -UseBasicParsing; Start-Process 'C:\\git.exe' -ArgumentList '/VERYSILENT /NORESTART /NOCANCEL /SP-' -Wait; Remove-Item 'C:\\git.exe' -Force}; Set-Location 'temp'; & 'C:\\Program Files\\Git\\bin\\git.exe' clone $REPO_URL project; if(!(Test-Path '.\\project\\setup-production-REPO.ps1')){throw 'clone/setup script missing'}; Set-Location 'project'; .\\setup-production-REPO.ps1; Set-Location 'C:\\'; Remove-Item -Recurse -Force 'temp'"
-            PARAMS=$(jq -cn --arg cmd "$PS_COMMAND" '{commands:[$cmd]}')
+            # 🔥 FIX 2: Enable SSH + inject public key via SSM
+            echo "Configuring SSH + key-based auth via SSM..."
 
+            PUB_KEY=$(cat key.pub)
+            KEY_HASH=$(echo "$PUB_KEY" | md5sum | cut -d' ' -f1)
+
+            aws ssm send-command \
+              --instance-ids "$ID" \
+              --document-name "AWS-RunPowerShellScript" \
+              --parameters "commands=[
+                \"Add-WindowsCapability -Online -Name OpenSSH.Server~~~~0.0.1.0\",
+                \"Start-Service sshd\",
+                \"Set-Service -Name sshd -StartupType Automatic\",
+                \"\$currentHash = ''\",
+                \"if(Test-Path 'C:\\ProgramData\\ssh\\administrators_authorized_keys'){\$currentHash = (Get-Content 'C:\\ProgramData\\ssh\\administrators_authorized_keys' -Raw).Trim()}\",
+                \"if(\$currentHash -ne '$PUB_KEY'){\",
+                \"  Set-Content -Path 'C:\\ProgramData\\ssh\\administrators_authorized_keys' -Value '$PUB_KEY' -Encoding UTF8\",
+                \"  icacls 'C:\\ProgramData\\ssh\\administrators_authorized_keys' /inheritance:r /grant 'SYSTEM:F' /grant 'Administrators:F'\",
+                \"  Restart-Service sshd\",
+                \"  Write-Host 'SSH key updated'\",
+                \"} else { Write-Host 'SSH key unchanged, skipping' }\",
+                \"if(!(Get-NetFirewallRule -Name 'SSHD-In-TCP' -ErrorAction SilentlyContinue)) { New-NetFirewallRule -Name 'SSHD-In-TCP' -DisplayName 'OpenSSH Server (sshd)' -Enabled True -Direction Inbound -Protocol TCP -Action Allow -LocalPort 22 }\"
+              ]" \
+              --region $AWS_REGION > /dev/null            
+            sleep 25
+
+            echo "[OK] SSH configured"
+
+            # 🔍 Check SSH port
+            echo "Checking SSH connectivity..."
+            timeout 10 bash -c "</dev/tcp/$IP/22" 2>/dev/null
+
+            if [ $? -ne 0 ]; then
+              echo "[FAIL] SSH still not available on $IP"
+              exit 1
+            fi
+
+            echo "[OK] SSH is available"
+
+            # 🧹 Clean temp directory
+            ssh -i key.pem -o StrictHostKeyChecking=no Administrator@$IP "powershell -Command \"Remove-Item -Recurse -Force 'C:\\temp\\project' -ErrorAction SilentlyContinue; New-Item -ItemType Directory -Force -Path 'C:\\temp\\project' | Out-Null; if(!(Test-Path 'C:\\temp\\project')){exit 1}\""
+
+            # 📦 Copy project
+            scp -i key.pem -o StrictHostKeyChecking=no -r . Administrator@$IP:"C:/temp/project"
+
+            # ▶️ Run setup script
             DEPLOY_CMD=$(aws ssm send-command \
               --instance-ids "$ID" \
               --document-name "AWS-RunPowerShellScript" \
-              --parameters "$PARAMS" \
+              --parameters "commands=[\"powershell -ExecutionPolicy Bypass -NonInteractive -File C:\\\\temp\\\\project\\\\setup-production-REPO.ps1\"]" \
               --timeout-seconds 600 \
               --output text \
               --query "Command.CommandId" \
               --region $AWS_REGION)
 
-            echo "Deploy command: $DEPLOY_CMD"
-            
-            if ! wait_for_ssm "$DEPLOY_CMD" "$ID"; then
-              echo "[FAIL] Deployment failed for $NAME"
+            echo "Setup command ID: $DEPLOY_CMD"
+
+          done
+
+            # Wait and poll
+
+            MAX_WAIT=600; ELAPSED=0
+
+            while [ $ELAPSED -lt $MAX_WAIT ]; do
+
+              STATUS=$(aws ssm get-command-invocation --instance-id "$ID" --command-id "$DEPLOY_CMD" --query "Status" --output text --region $AWS_REGION 2>/dev/null || echo "Pending")
+
+              echo "  $STATUS (${ELAPSED}s)"
+
+              [[ "$STATUS" == "Success" || "$STATUS" == "Failed" || "$STATUS" == "TimedOut" ]] && break
+
+              sleep 10; ELAPSED=$((ELAPSED + 10))
+
+            done
+
+            # Always print logs
+
+            echo "--- Stdout ---"
+
+            aws ssm get-command-invocation --instance-id "$ID" --command-id "$DEPLOY_CMD" --query "StandardOutputContent" --output text --region $AWS_REGION
+
+            echo "--- Stderr ---"
+
+            aws ssm get-command-invocation --instance-id "$ID" --command-id "$DEPLOY_CMD" --query "StandardErrorContent" --output text --region $AWS_REGION
+
+            if [ "$STATUS" != "Success" ]; then
+
+              echo "[FAIL] Setup script failed on $NAME"
+
               exit 1
+
             fi
 
             echo ""
+
             echo "[SUCCESS] Deployed to $NAME"
+
             echo "  API: http://$IP"
+
             echo ""
-          done
 
           echo "=========================================="
           echo "[SUCCESS] All deployments completed!"

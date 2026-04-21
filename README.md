@@ -39,9 +39,9 @@ aws ssm describe-instance-information --region YOUR_REGION
  
 **Step 4 — GitHub Actions also needs AWS access**
 Add these secrets to your repo (**Settings → Secrets → Actions**):
-- `AWS_ACCESS_KEY_ID`
-- `AWS_SECRET_ACCESS_KEY`
-- `AWS_REGION`
+- `Access_Key` (AWS Access Key ID)
+- `SecretAccess_Key` (AWS Secret Access Key)
+- `EC2_KEY` (EC2 private key `.pem` contents — used for SSH/SCP)
 The IAM user for those keys and to deploy needs this policy:
 ```json
 {
@@ -128,15 +128,13 @@ Do **not** copy the example app (`app/` folder). Use your own app code.
 4. `unicorn_config.json`
 5. `nginx.conf`
 6. `instances.json`
+7. `tools/nssm.exe`
 
 ### Add this only if you use Celery
-7. `celery_worker.py`
-8. `celery_app.py`
-9. `celery_config.json`
+8. `celery_worker.py`
+9. `celery_app.py`
+10. `celery_config.json`
 
-### Optional reference files
-- `templates/nginx-TEMPLATE.conf`
-- `templates/instances-TEMPLATE.json`
 
 ## 2) Quick “what to edit” map
 ### Usually copy as-is (minor optional edits)
@@ -157,7 +155,7 @@ Do **not** copy the example app (`app/` folder). Use your own app code.
 2. `setup-production-REPO.ps1` installs runtime + services.
 3. Two Windows services run Unicorn in separate modes:
    - `UnicornMaster` → `MODE=web`
-   - `UnicornWorker` → `MODE=worker`
+   - `UnicornWorker` → `MODE=worker` (if using celery)
 4. `unicorn_master.py` reads `unicorn_config.json`, starts matching services for that mode.
 5. Nginx routes incoming HTTP traffic to configured web worker ports.
 6. Celery worker runs separately (if configured).
@@ -171,7 +169,7 @@ This file controls:
 - port per worker
 - mode (`web` or `worker`)
 
-> ℹ️ The repo ships with `"script": "app/orders/app.py"` pointing to the example app. **Change this to your own entry script path before deploying.**
+> ℹ️ The repo ships with `"script": "app.py"` pointing to the example app. **Change this to your own entry script path before deploying.**
 
 ### Fields you edit
 - `services[].name`: any readable name (`api_0`, `api_1`, etc.)
@@ -187,9 +185,9 @@ This file controls:
 ```json
 {
   "services": [
-    {"name": "api_0", "script": "main.py", "port": 5000, "enabled": true},
-    {"name": "api_1", "script": "main.py", "port": 5001, "enabled": true},
-    {"name": "api_2", "script": "main.py", "port": 5002, "enabled": true},
+    {"name": "api_0", "script": "app.py", "port": 5000, "enabled": true},
+    {"name": "api_1", "script": "app.py", "port": 5001, "enabled": true},
+    {"name": "api_2", "script": "app.py", "port": 5002, "enabled": true},
     {"name": "worker_0", "script": "celery_worker.py", "port": 5100, "mode": "worker", "enabled": true}
   ],
   "restart_delay": 5
@@ -242,12 +240,21 @@ Usually you only edit:
 
 Everything else can stay as provided.
 
+**How deployment works:**
+1. SSM injects the SSH public key into `C:\ProgramData\ssh\administrators_authorized_keys` and starts OpenSSH — **only if the key has changed** (compares current vs new before overwriting, skips restart if unchanged)
+2. SCP copies project files to `C:\temp\project`
+3. SSM runs `setup-production-REPO.ps1` and waits for completion with live status polling and log output on failure
+
+**Required secret:** `EC2_KEY` — paste the full contents of your `.pem` private key. The workflow derives the public key automatically via `ssh-keygen -y`.
+
 ### 4.5 `setup-production-REPO.ps1` (usually keep, edit only if needed)
 Most projects keep this file as-is. Edit only when needed:
 - change install directory: `$INSTALL_PATH`
 - change Python version URL/path
 - change Nginx version
 - add extra install steps specific to your org
+
+**NSSM:** The script checks for `tools/nssm.exe` in your repo first and uses that — no download needed. Always commit `tools/nssm.exe` (win64) to avoid external dependency failures.
 
 ### 4.6 Celery universal setup (Redis / Sidekiq-style)
 If you want background jobs, keep these three files:
@@ -333,6 +340,15 @@ Get-Content C:\production\logs\worker_0.log -Tail 80
 - script path in `unicorn_config.json` is wrong/missing
 - app crashes at startup (check `C:\production\logs\*.log`)
 - Nginx ports and Unicorn ports mismatch
+- **app not reading `PORT` env var** — ensure your entry script uses `int(os.environ.get("PORT", <default>))` and binds to `host="0.0.0.0"`
+
+### Deployment reports success but app not running
+- SSH into instance and run `Get-Content C:\deployment.log` to see where setup stopped
+- Check services: `Get-Service UnicornMaster, UnicornWorker, NginxService`
+- Add a health check at end of deploy.yml to catch silent failures:
+```bash
+curl --retry 5 --retry-delay 5 --fail http://$IP/health || exit 1
+```
 
 ### Nginx default welcome page
 - your project `nginx.conf` was not copied to `C:\nginx\conf\nginx.conf`

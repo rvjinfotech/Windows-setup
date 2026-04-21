@@ -1,8 +1,8 @@
 {
   "services": [
-    {"name": "api_0", "script": "app.py", "port": 5000, "enabled": true},
-    {"name": "api_1", "script": "app.py", "port": 5001, "enabled": true},
-    {"name": "api_2", "script": "app.py", "port": 5002, "enabled": true}
+    {"name": "api_0", "script": "app.py", "port": 8000, "enabled": true},
+    {"name": "api_1", "script": "app.py", "port": 8001, "enabled": true},
+    {"name": "api_2", "script": "app.py", "port": 8002, "enabled": true}
   ],
   "restart_delay": 5
 }

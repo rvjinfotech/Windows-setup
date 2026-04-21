@@ -8,6 +8,7 @@
 #>
 
 $ErrorActionPreference = "Stop"
+Set-Location "C:\temp\project"
 $INSTALL_PATH = "C:\production"
 $REPO_PATH = Get-Location
 Start-Transcript -Path "C:\deployment.log" -Append
@@ -110,17 +111,7 @@ if (!(Test-Path "C:\Python313\python.exe")) {
 
 # ============================================================================
 # STEP 2: Install Git
-# ============================================================================
-Write-Host "[2/9] Installing Git..." -ForegroundColor Yellow
-if (!(Test-Path "C:\Program Files\Git\bin\git.exe")) {
-    Invoke-WebRequest -Uri "https://github.com/git-for-windows/git/releases/download/v2.47.1.windows.1/Git-2.47.1-64-bit.exe" -OutFile "C:\git.exe" -UseBasicParsing
-    Start-Process "C:\git.exe" -ArgumentList "/VERYSILENT /NORESTART /NOCANCEL /SP-" -Wait
-    Remove-Item "C:\git.exe" -Force
-    Write-Host "  [OK] Git installed" -ForegroundColor Green
-} else {
-    Write-Host "  [OK] Git already installed" -ForegroundColor Green
-}
-
+# ===========================================================================
 # ============================================================================
 # STEP 3: Copy Project to Production Directory
 # ============================================================================
@@ -164,7 +155,8 @@ if (!(Test-Path "C:\nssm\nssm.exe")) {
         Copy-Item "$INSTALL_PATH\tools\nssm.exe" "C:\nssm\nssm.exe" -Force
         Write-Host "  [OK] NSSM installed from project" -ForegroundColor Green
     } else {
-        $nssmUrl = "https://nssm.cc/release/nssm-2.24.zip"
+        Write-Host "  NSSM not found in project. Installing -- "
+        $nssmUrl = "https://github.com/imvickykumar999/Non-Sucking-Service-Manager/releases/download/nssm-2.24/nssm-2.24.zip"
         Invoke-WebRequest -Uri $nssmUrl -OutFile "C:\nssm.zip" -UseBasicParsing
         Expand-Archive "C:\nssm.zip" -DestinationPath C:\temp_nssm -Force
         New-Item -ItemType Directory -Path C:\nssm -Force | Out-Null
@@ -230,71 +222,75 @@ if (Test-Path "$INSTALL_PATH\unicorn_master.py") {
         Write-Host "  [OK] UnicornMaster (web) restarted" -ForegroundColor Green
     }
 
-    $workerEnv = @("MODE=worker")
-    $celeryEnvNames = @(
-        "CELERY_APP",
-        "CELERY_BROKER_URL",
-        "CELERY_RESULT_BACKEND",
-        "CELERY_LOGLEVEL",
-        "CELERY_POOL",
-        "CELERY_CONCURRENCY",
-        "CELERY_QUEUES",
-        "CELERY_EXTRA_ARGS",
-        "CELERY_IMPORTS"
-    )
-    $celeryConfigKeyMap = @{
-        "CELERY_APP" = "celery_app"
-        "CELERY_BROKER_URL" = "broker_url"
-        "CELERY_RESULT_BACKEND" = "result_backend"
-        "CELERY_LOGLEVEL" = "loglevel"
-        "CELERY_POOL" = "pool"
-        "CELERY_CONCURRENCY" = "concurrency"
-        "CELERY_QUEUES" = "queues"
-        "CELERY_EXTRA_ARGS" = "extra_args"
-        "CELERY_IMPORTS" = "imports"
-    }
-
-    $celeryConfigPath = "$INSTALL_PATH\\celery_config.json"
+    $celeryConfigPath = "$INSTALL_PATH\celery_config.json"
     $celeryConfig = Get-CeleryConfigObject -ConfigPath $celeryConfigPath
+
     if ($null -ne $celeryConfig) {
         Write-Host "  [OK] Loaded celery_config.json from project" -ForegroundColor Green
-    }
 
-    foreach ($envName in $celeryEnvNames) {
-        $configProperty = $celeryConfigKeyMap[$envName]
-        $configValue = Get-CeleryConfigValue -Config $celeryConfig -PropertyName $configProperty
-        $envValue = $configValue
-
-        if ([string]::IsNullOrWhiteSpace($envValue)) {
-            $envValue = Get-FirstAvailableEnvValue -Name $envName
+        $workerEnv = @("MODE=worker")
+        $celeryEnvNames = @(
+            "CELERY_APP",
+            "CELERY_BROKER_URL",
+            "CELERY_RESULT_BACKEND",
+            "CELERY_LOGLEVEL",
+            "CELERY_POOL",
+            "CELERY_CONCURRENCY",
+            "CELERY_QUEUES",
+            "CELERY_EXTRA_ARGS",
+            "CELERY_IMPORTS"
+        )
+        $celeryConfigKeyMap = @{
+            "CELERY_APP" = "celery_app"
+            "CELERY_BROKER_URL" = "broker_url"
+            "CELERY_RESULT_BACKEND" = "result_backend"
+            "CELERY_LOGLEVEL" = "loglevel"
+            "CELERY_POOL" = "pool"
+            "CELERY_CONCURRENCY" = "concurrency"
+            "CELERY_QUEUES" = "queues"
+            "CELERY_EXTRA_ARGS" = "extra_args"
+            "CELERY_IMPORTS" = "imports"
         }
 
-        if (![string]::IsNullOrWhiteSpace($envValue)) {
-            $workerEnv += "$envName=$envValue"
-        }
-    }
+        foreach ($envName in $celeryEnvNames) {
+            $configProperty = $celeryConfigKeyMap[$envName]
+            $configValue = Get-CeleryConfigValue -Config $celeryConfig -PropertyName $configProperty
+            $envValue = $configValue
 
-    if (($workerEnv | Where-Object { $_ -like "CELERY_APP=*" }).Count -eq 0) {
-        $workerEnv += "CELERY_APP=celery_app:celery"
-        Write-Host "  [OK] CELERY_APP not set. Using default celery_app:celery" -ForegroundColor Yellow
-    }
-    Write-Host "  [OK] Celery settings prepared for UnicornWorker" -ForegroundColor Green
-    
-    # Setup Worker service
-    $workerService = Get-Service UnicornWorker -ErrorAction SilentlyContinue
-    if (!$workerService) {
-        & C:\nssm\nssm.exe install UnicornWorker "$INSTALL_PATH\venv\Scripts\python.exe" "$INSTALL_PATH\unicorn_master.py"
-        & C:\nssm\nssm.exe set UnicornWorker AppDirectory $INSTALL_PATH
-        & C:\nssm\nssm.exe set UnicornWorker AppEnvironmentExtra $workerEnv
-        & C:\nssm\nssm.exe set UnicornWorker Start SERVICE_AUTO_START
-        & C:\nssm\nssm.exe start UnicornWorker
-        Write-Host "  [OK] UnicornWorker installed" -ForegroundColor Green
+            if ([string]::IsNullOrWhiteSpace($envValue)) {
+                $envValue = Get-FirstAvailableEnvValue -Name $envName
+            }
+
+            if (![string]::IsNullOrWhiteSpace($envValue)) {
+                $workerEnv += "$envName=$envValue"
+            }
+        }
+
+        if (($workerEnv | Where-Object { $_ -like "CELERY_APP=*" }).Count -eq 0) {
+            $workerEnv += "CELERY_APP=celery_app:celery"
+            Write-Host "  [OK] CELERY_APP not set. Using default celery_app:celery" -ForegroundColor Yellow
+        }
+        Write-Host "  [OK] Celery settings prepared for UnicornWorker" -ForegroundColor Green
+
+        # Setup Worker service
+        $workerService = Get-Service UnicornWorker -ErrorAction SilentlyContinue
+        if (!$workerService) {
+            & C:\nssm\nssm.exe install UnicornWorker "$INSTALL_PATH\venv\Scripts\python.exe" "$INSTALL_PATH\unicorn_master.py"
+            & C:\nssm\nssm.exe set UnicornWorker AppDirectory $INSTALL_PATH
+            & C:\nssm\nssm.exe set UnicornWorker AppEnvironmentExtra $workerEnv
+            & C:\nssm\nssm.exe set UnicornWorker Start SERVICE_AUTO_START
+            & C:\nssm\nssm.exe start UnicornWorker
+            Write-Host "  [OK] UnicornWorker installed" -ForegroundColor Green
+        } else {
+            & C:\nssm\nssm.exe set UnicornWorker AppEnvironmentExtra $workerEnv
+            & C:\nssm\nssm.exe restart UnicornWorker
+            Write-Host "  [OK] UnicornWorker restarted" -ForegroundColor Green
+        }
     } else {
-        & C:\nssm\nssm.exe set UnicornWorker AppEnvironmentExtra $workerEnv
-        & C:\nssm\nssm.exe restart UnicornWorker
-        Write-Host "  [OK] UnicornWorker restarted" -ForegroundColor Green
+        Write-Host "  [SKIP] celery_config.json not found. Skipping UnicornWorker." -ForegroundColor Yellow
     }
 }
+    
 
 # Setup Nginx service
 $nginxService = Get-Service NginxService -ErrorAction SilentlyContinue

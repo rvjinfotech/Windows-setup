@@ -10,7 +10,7 @@ app = FastAPI(title="Sample Running App")
 
 @app.get("/")
 async def read_root() -> dict[str, str]:
-    return {"message": "FastAPI server is running"}
+    return {"message": "FastAPI server is running fine"}
 
 
 @app.get("/health")
