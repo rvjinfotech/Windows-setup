@@ -1,9 +1,9 @@
 {
   "instances": [
     {
-      "name": "window-server",
-      "instance_id": "i-023f7925f3ce72aeb",
-      "server_ip": "3.109.60.218"
+      "name": "window-test",
+      "instance_id": "i-0c4408b2699137482",
+      "server_ip": "65.2.152.152"
     }
   ]
 }

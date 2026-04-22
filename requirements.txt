@@ -1,4 +1,4 @@
-flask==3.0.3
+
 redis==5.0.8
 fastapi
 uvicorn
