@@ -1,6 +1,6 @@
 import asyncio
 from datetime import datetime, timezone
-
+import os
 import uvicorn
 from fastapi import FastAPI
 
@@ -10,7 +10,8 @@ app = FastAPI(title="Sample Running App")
 
 @app.get("/")
 async def read_root() -> dict[str, str]:
-    return {"message": "FastAPI server is running fine"}
+    port = os.getenv("PORT", 8000)
+    return {"message": f"FastAPI server is running fine on port {port}!"}
 
 
 @app.get("/health")
@@ -42,4 +43,5 @@ async def stop_background_worker() -> None:
 
 
 if __name__ == "__main__":
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    port = int(os.getenv("PORT", 8000))
+    uvicorn.run(app, host="0.0.0.0", port=port)
