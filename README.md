@@ -291,8 +291,8 @@ curl https://get.acme.sh | sh
 **Generate certificate using DNS challenge** (no need to open port 80):
 
 ```bash
-~/.acme.sh/acme.sh --register-account -m yashdhanwaniat2018@gmail.com
-~/.acme.sh/acme.sh --issue --dns dns_aws -d ssl-test.rvjtech.net     
+~/.acme.sh/acme.sh --register-account -m youremail@gmail.com
+~/.acme.sh/acme.sh --issue --dns dns_aws -d domainurl.com   
 ```
 This will generate the keys and will save it in your local machine at /Users/username/.acme.sh/domainname
 
