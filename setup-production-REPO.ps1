@@ -174,6 +174,11 @@ if (!(Test-Path "C:\nssm\nssm.exe")) {
 # ============================================================================
 Write-Host "[6/9] Installing Nginx..." -ForegroundColor Yellow
 if (!(Test-Path "C:\nginx\nginx.exe")) {
+    if (Test-Path "C:\nginx") {
+        Write-Host "  [WARN] Existing C:\nginx directory found without nginx.exe. Removing stale directory..." -ForegroundColor Yellow
+        Remove-Item "C:\nginx" -Recurse -Force
+    }
+
     Invoke-WebRequest -Uri "http://nginx.org/download/nginx-1.24.0.zip" -OutFile "C:\nginx.zip" -UseBasicParsing
     Expand-Archive "C:\nginx.zip" -DestinationPath C:\ -Force
     Rename-Item "C:\nginx-1.24.0" "C:\nginx" -Force
