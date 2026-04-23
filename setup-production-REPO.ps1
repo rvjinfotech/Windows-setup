@@ -314,6 +314,6 @@ if ($worker)  { Write-Host "UnicornWorker: $($worker.Status)"  -ForegroundColor 
 if ($nginx)   { Write-Host "NginxService:  $($nginx.Status)"   -ForegroundColor $(if($nginx.Status   -eq 'Running'){'Green'}else{'Red'}) }
 
 Write-Host ""
-Write-Host "Access your app at: https://YOUR_DOMAIN or http://YOUR_SERVER_IP"
+Write-Host "Done"
 Write-Host ""
 Stop-Transcript
