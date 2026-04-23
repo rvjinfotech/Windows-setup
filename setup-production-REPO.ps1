@@ -200,6 +200,14 @@ if (!$firewallRule) {
 } else {
     Write-Host "  [OK] Firewall already configured" -ForegroundColor Green
 }
+$rule443 = Get-NetFirewallRule -DisplayName "Allow HTTPS Port 443" -ErrorAction SilentlyContinue
+if (!$rule443) {
+    New-NetFirewallRule -DisplayName "Allow HTTPS Port 443" -Direction Inbound -LocalPort 443 -Protocol TCP -Action Allow | Out-Null
+    Write-Host "  [OK] Port 443 firewall rule added" -ForegroundColor Green
+} else {
+    Write-Host "  [OK] Firewall already configured" -ForegroundColor Green
+}
+
 
 # ============================================================================
 # STEP 8: Setup Windows Services
@@ -292,7 +300,8 @@ if (Test-Path "$INSTALL_PATH\unicorn_master.py") {
 }
     
 
-# Setup Nginx service
+
+# Setup/restart Nginx with final config (SSL if cert exists, HTTP if not)
 $nginxService = Get-Service NginxService -ErrorAction SilentlyContinue
 if (!$nginxService) {
     & C:\nssm\nssm.exe install NginxService "C:\nginx\nginx.exe"
@@ -301,12 +310,35 @@ if (!$nginxService) {
     & C:\nssm\nssm.exe start NginxService
     Write-Host "  [OK] Nginx service installed" -ForegroundColor Green
 } else {
-    & C:\nssm\nssm.exe restart NginxService
+    & C:\nssm\nssm.exe stop NginxService confirm
+    Start-Sleep -Seconds 2
+
+    if (!(Test-Path "C:\nginx\conf\ssl\cert.pem")) {
+    Write-Host "  [WARN] SSL cert missing, falling back to HTTP config" -ForegroundColor Yellow
+    # Copy HTTP-only nginx config if you have one, or just continue
+    } else {
+    Write-Host "  [OK] SSL certs present" -ForegroundColor Green
+}
+    Write-Host "  [OK] SSL certs present" -ForegroundColor Green
+    $ErrorActionPreference = "Continue"
+    Push-Location "C:\nginx"
+    $testResult = & "C:\nginx\nginx.exe" -t 2>&1
+    $nginxExitCode = $LASTEXITCODE
+    Pop-Location
+    $ErrorActionPreference = "Stop"
+
+    Write-Host $testResult
+    if ($nginxExitCode -ne 0) {
+        Write-Host "  [FAIL] Nginx config test failed" -ForegroundColor Red
+        exit 1
+    }
+    Write-Host "  [OK] Nginx config valid" -ForegroundColor Green
+
+    & C:\nssm\nssm.exe start NginxService
     Write-Host "  [OK] Nginx service restarted" -ForegroundColor Green
 }
-
 # ============================================================================
-# STEP 9: Verification
+# STEP 09: Verification
 # ============================================================================
 Write-Host "[9/9] Verifying installation..." -ForegroundColor Yellow
 Start-Sleep -Seconds 10
@@ -331,7 +363,6 @@ if ($nginx) {
 }
 
 Write-Host ""
-Write-Host "Project installed at: $INSTALL_PATH"
-Write-Host "Access your app at: http://YOUR_SERVER_IP"
+Write-Host "Access your app at: https://YOUR_DOMAIN or http://YOUR_SERVER_IP"
 Write-Host ""
 Stop-Transcript

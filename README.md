@@ -42,7 +42,10 @@ aws ssm describe-instance-information --region YOUR_REGION
 Add these secrets to your repo (**Settings → Secrets → Actions**):
 - `Access_Key` (AWS Access Key ID)
 - `SecretAccess_Key` (AWS Secret Access Key)
-- `EC2_KEY` (EC2 private key `.pem` contents — used for SSH/SCP)(it is the content of the **key pair** that we saved in our local machine)
+- `EC2_KEY` (EC2 private key `.pem` contents — used for SSH)(it is the content of the **key pair** that we saved in our local machine)
+- `SSL_CERT` (optional — full contents of `fullchain.pem`, only if using HTTPS)
+- `SSL_KEY` (optional — full contents of `privkey.pem`, only if using HTTPS)
+
 The IAM user for those keys and to deploy needs this policy:
 ```json
 {
@@ -72,7 +75,7 @@ GitHub push
     │
     ▼
 deploy.yml (GitHub Actions)
-    │  sends SSM command to EC2
+    │  SSM injects SSH key → SSH copies files + runs setup script → polls for result
     ▼
 setup-production-REPO.ps1 (runs on Windows EC2)
     │  installs Python, Nginx, NSSM services
@@ -130,6 +133,8 @@ Do **not** copy the example app (`app/` folder). Use your own app code.
 5. `nginx.conf`
 6. `instances.json`
 7. `tools/nssm.exe`
+
+> ℹ️ SSL certs are never committed to the repo — store them in GitHub secrets `SSL_CERT` and `SSL_KEY` (see Section 3.4 for SSL setup).
 
 ### Add this only if you use Celery
 8. `celery_worker.py`
@@ -191,7 +196,7 @@ Every `script` path in `unicorn_config.json` must exist in your project.
 
 ### 3.2 `nginx.conf` (routing + load balancing)
 Nginx must match the web ports in `unicorn_config.json`.
-Default universal routing pattern:
+Default universal routing pattern (HTTP only):
 ```nginx
 upstream app_servers {
     server 127.0.0.1:5000;
@@ -201,7 +206,10 @@ upstream app_servers {
 
 server {
     listen 80;
-    server_name _;
+    server_name _;    #Add your domain here if have any
+    ssl_certificate     C:/nginx/conf/ssl/cert.pem; #do not change the path
+    ssl_certificate_key C:/nginx/conf/ssl/key.pem;  #do not change the path
+
 
     location / {
         proxy_pass http://app_servers;
@@ -227,16 +235,80 @@ Set the EC2 instances to deploy to.
 
 ### 3.4 `.github/workflows/deploy.yml` (usually keep, optional edits)
 Usually you only edit:
-- `env.AWS_REGION` **Currently the ap-south-1 for default**
+- `env.AWS_REGION` **Currently ap-south-1 by default**
 
 Everything else can stay as provided.
 
 **How deployment works:**
-1. SSM injects the SSH public key into `C:\ProgramData\ssh\administrators_authorized_keys` and starts OpenSSH — **only if the key has changed** (compares current vs new before overwriting, skips restart if unchanged)
-2. SCP copies project files to `C:\temp\project`
-3. SSM runs `setup-production-REPO.ps1` and waits for completion with live status polling and log output on failure
+1. SSM injects the SSH public key into `C:\ProgramData\ssh\administrators_authorized_keys` — **only if the key has changed** (skips sshd restart if unchanged)
+2. SCP clones your GitHub files into `C:\temp\project` on the EC2 and runs `setup-production-REPO.ps1`
+3. Polls SSM every 10 seconds (up to 600s), prints full stdout/stderr on failure
+4. SSL certs are written to `C:\nginx\conf\ssl\` from `SSL_CERT`/`SSL_KEY` secrets — **only on first deploy if files don't exist**
 
-**Required secret:** `EC2_KEY` — paste the full contents of your `.pem` private key. The workflow derives the public key automatically via `ssh-keygen -y`.
+**Required secrets:** `Access_Key`, `SecretAccess_Key`, `EC2_KEY`
+
+**Optional secrets (SSL only):** `SSL_CERT`, `SSL_KEY`
+
+### 3.4.1 SSL Certificate Setup (one-time, if using HTTPS)
+
+Generate a free Let's Encrypt certificate using `acme.sh`. Run these on your **local machine** or any Linux/Mac:
+**Your terminal should have access to your aws account, that IAM user should have these permissions**
+
+```json
+    {
+      "Effect": "Allow",
+      "Action": [
+        "route53:ListHostedZones",
+        "route53:GetHostedZone",
+        "route53:ListResourceRecordSets",
+        "route53:ChangeResourceRecordSets",
+        "route53:ListHostedZonesByName"
+      ],
+      "Resource": "*"
+    }
+
+```
+
+**Add AWS credentials**
+```bash
+export AWS_ACCESS_KEY_ID="access key value" 
+export AWS_SECRET_ACCESS_KEY="Secret key value"
+export AWS_REGION="ap-south-1" 
+```
+These credentials are saved in your terminal for that session only, they are removed once you create a new session. If you still want to remove them follow these commands: 
+
+```bash
+unset AWS_ACCESS_KEY_ID
+unset AWS_SECRET_ACCESS_KEY
+unset AWS_REGION
+```
+
+**Install acme.sh:**
+```bash
+curl https://get.acme.sh | sh
+```
+
+**Generate certificate using DNS challenge** (no need to open port 80):
+
+```bash
+~/.acme.sh/acme.sh --register-account -m yashdhanwaniat2018@gmail.com
+~/.acme.sh/acme.sh --issue --dns dns_aws -d ssl-test.rvjtech.net     
+```
+This will generate the keys and will save it in your local machine at /Users/username/.acme.sh/domainname
+
+**Add keys to the github secrets**
+1. Go to the repo secrets and create secrets named `SSL_CERT` and `SSL_KEY`and paste the content of domainname.cert and domainname.key respectively. 
+
+**Renewal (every 90 days):**
+1. Re-run the acme.sh renew command ```bash acme.sh --renew -d example.com ```
+2. Update `SSL_CERT` and `SSL_KEY` secrets in GitHub
+3. Delete cert files on server so deploy rewrites them:
+
+```powershell
+Remove-Item C:\nginx\conf\ssl\cert.pem
+Remove-Item C:\nginx\conf\ssl\key.pem
+```
+4. Redeploy
 
 ### 3.5 `setup-production-REPO.ps1` (usually keep, edit only if needed)
 Most projects keep this file as-is. Edit only when needed:
@@ -246,6 +318,8 @@ Most projects keep this file as-is. Edit only when needed:
 - add extra install steps specific to your org
 
 **NSSM:** The script checks for `tools/nssm.exe` in your repo first and uses that — no download needed. Always commit `tools/nssm.exe` (win64) to avoid external dependency failures.
+
+**SSL:** Certs are written by `deploy.yml` before the setup script runs — the script just needs them to exist at `C:\nginx\conf\ssl\` which deploy.yml handles automatically.
 
 ### 3.6 Celery universal setup (Redis / Sidekiq-style)
 If you want background jobs, keep these three files:
@@ -326,6 +400,12 @@ Get-Content C:\production\logs\api_0.log -Tail 80
 Get-Content C:\production\logs\worker_0.log -Tail 80
 ```
 
+### Check SSL certs exist
+```powershell
+Test-Path "C:\nginx\conf\ssl\cert.pem"
+Test-Path "C:\nginx\conf\ssl\key.pem"
+```
+
 ## 7) Troubleshooting (by symptom)
 ### 502 Bad Gateway
 - script path in `unicorn_config.json` is wrong/missing
@@ -345,6 +425,25 @@ curl --retry 5 --retry-delay 5 --fail http://$IP/health || exit 1
 - your project `nginx.conf` was not copied to `C:\nginx\conf\nginx.conf`
 - Nginx service not restarted after config update
 
+### NginxService Paused
+- Force stop then test config:
+```powershell
+& C:\nssm\nssm.exe stop NginxService confirm
+& C:\nginx\nginx.exe -t
+```
+- Most likely cause: SSL cert paths in `nginx.conf` don't exist on server yet
+- Check certs: `Test-Path "C:\nginx\conf\ssl\cert.pem"`
+
+### SSL not working
+- Check certs exist on server: `Test-Path "C:\nginx\conf\ssl\cert.pem"`
+- `SSL_CERT` and `SSL_KEY` secrets not set in GitHub
+- Cert already exists on server so deploy skipped writing — delete and redeploy:
+```powershell
+Remove-Item C:\nginx\conf\ssl\cert.pem
+Remove-Item C:\nginx\conf\ssl\key.pem
+```
+- Let's Encrypt certs expire every 90 days — renew via acme.sh, update secrets, delete files on server, redeploy
+
 ### Requests not balancing across workers
 - `nginx.conf` upstream ports do not match enabled web workers
 - one or more web workers are crashing (check logs)
@@ -363,6 +462,7 @@ For each new Python project:
    - `nginx.conf` — match upstream ports to your workers
    - `instances.json` — set your EC2 `instance_id` and `server_ip`
 4. Add Celery only if needed (`celery_worker.py` + `celery_app.py` + `celery_config.json`).
-5. Keep core universal scripts stable unless you have infra-level reasons to change them.
+5. For SSL: generate cert via acme.sh, add `SSL_CERT`/`SSL_KEY` secrets, update `nginx.conf` with domain and SSL blocks.
+6. Keep core universal scripts stable unless you have infra-level reasons to change them.
 
 This keeps deployment setup repeatable across projects while still giving flexible worker/routing control.
